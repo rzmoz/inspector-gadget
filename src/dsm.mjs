@@ -25,7 +25,7 @@ import { buildModel } from './codebase-model.mjs';
 
 const config = loadConfig();
 const {
-  files, edges, allCtx, allGroups, byGroup, gAdj, CONTEXTS,
+  files, edges, allCtx, allGroups, byGroup, CONTEXTS,
   contextOf, ctxColour, groupOf, colourOf,
   fileScc, groupScc, ctxScc, thirdParty,
 } = buildModel(config);
@@ -180,27 +180,23 @@ const tpEdgeIdx = thirdParty.edges.map(([f, pkg]) => [fIndex.get(f), tpFi.get(pk
 
 // ---- graph-tab data (first-party only; third-party omitted from the graph) ----
 // Contexts = compound parents, namespaces = collapsible compounds, files =
-// leaves. ns→ns edges carry directionality (crossCtx / nsCycle / forward);
-// intra-namespace file→file edges (shown when a namespace is expanded) are
-// intra or fileCycle. Rendered by graph.client.js with Cytoscape.
+// leaves. We ship the FULL file→file edge list with per-edge metadata; the
+// client routes each edge to the deepest visible node on each end (file when its
+// namespace is expanded, else the namespace), aggregates duplicates, and colours
+// by relationship — so unfolding a namespace reattaches edges to its files.
 const gCtxOf = new Map(allGroups.map((g) => [g, contextOf(byGroup.get(g)[0])]));
 const gNodes = [];
 for (const c of allCtx) gNodes.push({ id: 'c:' + c, label: c, kind: 'context', colour: ctxColour(c) });
 for (const g of allGroups) gNodes.push({ id: 'n:' + g, parent: 'c:' + gCtxOf.get(g), label: g.split(' · ').pop(), kind: 'namespace', colour: colourOf(g), title: g });
 for (const f of files) gNodes.push({ id: 'f:' + fIndex.get(f), parent: 'n:' + groupOf(f), label: f.split('/').pop(), kind: 'file', colour: colourOf(groupOf(f)), title: f });
-const gNsEdges = [];
-for (const [g, set] of gAdj) for (const h of set) {
-  const kind = gCtxOf.get(g) !== gCtxOf.get(h) ? 'crossCtx'
-    : (groupScc.id.get(g) === groupScc.id.get(h) && groupScc.size(g) > 1) ? 'nsCycle' : 'forward';
-  gNsEdges.push({ source: 'n:' + g, target: 'n:' + h, kind });
-}
 const gFileEdges = [];
 for (const [a, b] of edges) {
-  if (groupOf(a) !== groupOf(b)) continue; // only intra-namespace file edges in the graph
-  const cyc = fileScc.id.get(a) === fileScc.id.get(b) && fileScc.size(a) > 1;
-  gFileEdges.push({ source: 'f:' + fIndex.get(a), target: 'f:' + fIndex.get(b), ns: 'n:' + groupOf(a), kind: cyc ? 'fileCycle' : 'intra' });
+  const na = groupOf(a), nb = groupOf(b);
+  const nsCyc = na !== nb && groupScc.id.get(na) === groupScc.id.get(nb) && groupScc.size(na) > 1;
+  const fileCyc = fileScc.id.get(a) === fileScc.id.get(b) && fileScc.size(a) > 1;
+  gFileEdges.push({ s: 'f:' + fIndex.get(a), t: 'f:' + fIndex.get(b), ns1: 'n:' + na, ns2: 'n:' + nb, ctx1: 'c:' + contextOf(a), ctx2: 'c:' + contextOf(b), nsCyc, fileCyc });
 }
-const graph = { nodes: gNodes, nsEdges: gNsEdges, fileEdges: gFileEdges };
+const graph = { nodes: gNodes, fileEdges: gFileEdges };
 
 const payload = { nodes, roots, edges: [...edgeIdx, ...tpEdgeIdx], filePaths: [...files, ...packages], fileComp, cycleComps, reachPairs, contexts, thirdPartyCtxId: packages.length ? tpCtxId : null, fileCount: files.length, edgeCount: edges.length, tpCount: packages.length, graph };
 
