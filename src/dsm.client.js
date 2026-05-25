@@ -39,7 +39,7 @@
   // root contexts in the active order, with (third-party) always pinned last
   // (it's a pure sink, so it would otherwise float to the top), and dropped when
   // the third-party toggle is off.
-  const rootOrder = () => { let a = ordered(T.roots); if (TP) { a = a.filter((id) => id !== TP); if (state.tp === 'show') a.push(TP); } return a; };
+  const rootOrder = (includeTp) => { let a = ordered(T.roots); if (TP) { a = a.filter((id) => id !== TP); if (includeTp) a.push(TP); } return a; };
 
   // visible ancestors of a file (the nodes that currently carry its weight)
   const visAnc = (fi) => { const fid = 'f:' + fi, ns = N[fid].parent, ctx = N[ns].parent; const out = [ctx]; if (expanded[ctx]) { out.push(ns); if (expanded[ns]) out.push(fid); } return out; };
@@ -53,11 +53,18 @@
   }
 
   function render() {
+    // Columns are first-party only — third-party is NEVER a column (NDepend
+    // style); it only ever appears as rows at the bottom (when toggled on).
     // visible nodes = pre-order over the expanded tree
-    const vis = [];
-    const recf = (id) => { vis.push(id); if (N[id].kind !== 'file' && expanded[id]) for (const c of kids(id)) recf(c); };
-    for (const r of rootOrder()) recf(r);
-    const n = vis.length;
+    const buildVis = (includeTp) => {
+      const out = [];
+      const recf = (id) => { out.push(id); if (N[id].kind !== 'file' && expanded[id]) for (const c of kids(id)) recf(c); };
+      for (const r of rootOrder(includeTp)) recf(r);
+      return out;
+    };
+    const visCols = buildVis(false);
+    const visRows = buildVis(state.tp === 'show');
+    const nR = visRows.length, nC = visCols.length;
 
     // aggregate cells from file edges (parent rows sum their descendants)
     const cell = new Map();
@@ -80,25 +87,25 @@
         }
       }
     }
-    cur = { vis, cell, indSet };
+    cur = { visRows, visCols, cell, indSet };
 
     // context / namespace separators (tree order keeps each group contiguous)
-    const rowB = vis.map((id, k) => k === 0 ? '' : (N[id].ctx !== N[vis[k - 1]].ctx ? 'ctop' : (nsKey(id) !== nsKey(vis[k - 1]) ? 'nstop' : '')));
-    const colB = vis.map((id, k) => k === 0 ? '' : (N[id].ctx !== N[vis[k - 1]].ctx ? 'cleft' : (nsKey(id) !== nsKey(vis[k - 1]) ? 'nsleft' : '')));
+    const rowB = visRows.map((id, k) => k === 0 ? '' : (N[id].ctx !== N[visRows[k - 1]].ctx ? 'ctop' : (nsKey(id) !== nsKey(visRows[k - 1]) ? 'nstop' : '')));
+    const colB = visCols.map((id, k) => k === 0 ? '' : (N[id].ctx !== N[visCols[k - 1]].ctx ? 'cleft' : (nsKey(id) !== nsKey(visCols[k - 1]) ? 'nsleft' : '')));
 
     const nc = T.cycleComps.length;
-    meta.innerHTML = `<b>Hierarchical DSM</b> — ${n} rows shown · ${T.fileCount} files · ${T.edgeCount} imports · ${nc} file cycle${nc === 1 ? '' : 's'}`;
+    meta.innerHTML = `<b>Hierarchical DSM</b> — ${nR} rows × ${nC} cols · ${T.fileCount} files · ${T.edgeCount} imports · ${nc} file cycle${nc === 1 ? '' : 's'}`;
 
     let h = '<table class="dsm"><thead><tr><th class="corner">↓ row depends on col →</th>';
-    for (let c = 0; c < n; c++) h += `<th class="colh${colB[c] ? ' ' + colB[c] : ''}" data-c="${c}" title="${esc(N[vis[c]].title)}" style="background:${CC[N[vis[c]].ctx] || ''}">${c + 1}</th>`;
+    for (let c = 0; c < nC; c++) h += `<th class="colh${colB[c] ? ' ' + colB[c] : ''}" data-c="${c}" title="${esc(N[visCols[c]].title)}" style="background:${CC[N[visCols[c]].ctx] || ''}"><div class="chl"><span class="cname">${esc(N[visCols[c]].label)}</span><span class="cnum">${c + 1}</span></div></th>`;
     h += '</tr></thead><tbody>';
-    for (let r = 0; r < n; r++) {
-      const R = vis[r], rn = N[R];
+    for (let r = 0; r < nR; r++) {
+      const R = visRows[r], rn = N[R];
       const tog = rn.kind === 'file' ? '<span class="tog sp">•</span>' : `<span class="tog">${expanded[R] ? '▾' : '▸'}</span>`;
       const pad = 8 + rn.depth * 15;
-      h += `<tr data-r="${r}"><th class="rowh k-${rn.kind}${rowB[r] ? ' ' + rowB[r] : ''}" data-id="${R}" data-r="${r}" title="${esc(rn.title)}" style="background:${CC[rn.ctx] || ''};padding-left:${pad}px">${tog}<i style="background:${rn.colour}"></i><span class="num">${r + 1}</span>${esc(rn.label)}</th>`;
-      for (let c = 0; c < n; c++) {
-        const C = vis[c];
+      h += `<tr data-r="${r}"><th class="rowh k-${rn.kind}${rowB[r] ? ' ' + rowB[r] : ''}" data-id="${R}" data-r="${r}" title="${esc(rn.title)}" style="background:${CC[rn.ctx] || ''};padding-left:${pad}px">${tog}${rn.kind === 'context' ? `<i style="background:${rn.colour}"></i>` : ''}<span class="num">${r + 1}</span>${esc(rn.label)}</th>`;
+      for (let c = 0; c < nC; c++) {
+        const C = visCols[c];
         const bnd = (rowB[r] ? ' ' + rowB[r] : '') + (colB[c] ? ' ' + colB[c] : '');
         if (R === C) { h += `<td class="diag${bnd}" data-r="${r}" data-c="${c}" style="background:${rn.colour}"></td>`; continue; }
         if (isAnc(R, C) || isAnc(C, R)) { h += `<td class="nest${bnd}" data-r="${r}" data-c="${c}"></td>`; continue; }
@@ -115,17 +122,17 @@
     }
     h += '</tbody></table>';
     grid.innerHTML = h;
-    indexCells(n);
+    indexCells(nC);
     syncButtons();
     closePanel();
     curR = curC = -1;
     help.innerHTML = 'Click a context/namespace row to expand or collapse it. Hover a cell to read the dependency; click a cell to list the imports behind it.';
   }
 
-  function indexCells(n) {
+  function indexCells(nC) {
     const t = grid.querySelector('table');
     HL.rowEls = Array.from(t.tBodies[0].rows);
-    HL.colCells = Array.from({ length: n }, () => []);
+    HL.colCells = Array.from({ length: nC }, () => []);
     HL.colHs = []; HL.rowHs = [];
     t.querySelectorAll('.colh').forEach((th) => { HL.colHs[+th.dataset.c] = th; });
     HL.rowEls.forEach((tr) => { HL.rowHs[+tr.dataset.r] = tr.querySelector('.rowh'); tr.querySelectorAll('td').forEach((td) => HL.colCells[+td.dataset.c].push(td)); });
@@ -153,7 +160,7 @@
   grid.addEventListener('mouseleave', clearHL);
 
   function rel(r, c) { // returns {R,C,rn,cn,d,u,containment}
-    const R = cur.vis[r], C = cur.vis[c];
+    const R = cur.visRows[r], C = cur.visCols[c];
     if (R === C || isAnc(R, C) || isAnc(C, R)) return { R, C, rn: N[R], cn: N[C], containment: true };
     return { R, C, rn: N[R], cn: N[C], d: cur.cell.get(R + '>' + C), u: cur.cell.get(C + '>' + R) };
   }
@@ -169,8 +176,8 @@
       else if (cur.indSet.has(x.C + '>' + x.R)) s += `<span class="t-green">indirect — reached transitively</span>`;
       else s += 'no dependency';
       help.innerHTML = s;
-    } else if (r >= 0) help.innerHTML = `row <b>${r + 1}.</b> ${esc(N[cur.vis[r]].title)} — read across → for what it depends on`;
-    else if (c >= 0) help.innerHTML = `col <b>${c + 1}.</b> ${esc(N[cur.vis[c]].title)} — read down ↓ for what depends on it`;
+    } else if (r >= 0) help.innerHTML = `row <b>${r + 1}.</b> ${esc(N[cur.visRows[r]].title)} — read across → for what it depends on`;
+    else if (c >= 0) help.innerHTML = `col <b>${c + 1}.</b> ${esc(N[cur.visCols[c]].title)} — read down ↓ for what depends on it`;
   }
 
   // ---- click: toggle a parent row, or open a cell's import list ----

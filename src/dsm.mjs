@@ -197,12 +197,15 @@ const CSS = `
   .grid{overflow:auto;max-height:calc(100vh - 152px);flex:1}
   table.dsm{border-collapse:separate;border-spacing:0;font-size:11px}
   .dsm th,.dsm td{border-right:1px solid #eef2f7;border-bottom:1px solid #eef2f7}
-  .dsm thead th{position:sticky;top:0;z-index:2;background:#f1f5f9;height:25px;min-width:25px;width:25px;text-align:center;color:#64748b;font-weight:600}
-  .dsm .corner{left:0;z-index:4;min-width:var(--rowh);width:var(--rowh);background:#e2e8f0;text-align:left;padding:0 8px;color:#475569;font-weight:600;white-space:nowrap}
+  .dsm thead th{position:sticky;top:0;z-index:2;background:#f1f5f9;height:var(--colh);min-width:25px;width:25px;text-align:center;color:#64748b;font-weight:600;vertical-align:bottom;padding:0}
+  .dsm thead .chl{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;padding:0 0 4px;gap:3px}
+  .dsm thead .cname{writing-mode:vertical-rl;max-height:calc(var(--colh) - 22px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:#334155}
+  .dsm thead .cnum{color:#94a3b8;font-size:10px;font-weight:600}
+  .dsm .corner{left:0;z-index:4;min-width:var(--rowh);width:var(--rowh);background:#e2e8f0;text-align:left;padding:0 8px 6px;color:#475569;font-weight:600;white-space:nowrap;vertical-align:bottom}
   .dsm th.rowh{position:sticky;left:0;z-index:1;background:#f8fafc;text-align:left;white-space:nowrap;max-width:var(--rowh);min-width:var(--rowh);width:var(--rowh);overflow:hidden;text-overflow:ellipsis;padding:0 8px;font-weight:500}
   .dsm th.rowh i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:0;border:1px solid #00000022}
   .dsm th.rowh b{color:#94a3b8;font-weight:600;margin-right:4px}
-  .dsm td{width:25px;height:25px;min-width:25px;text-align:center;cursor:pointer;color:#fff;font-weight:600}
+  .dsm td{width:25px;height:25px;min-width:25px;text-align:center;cursor:pointer;color:#fff;font-weight:600;background:#e4e9f0}
   .dsm td.diag{cursor:default;color:#00000055;font-weight:400}
   .dsm td.dep{background:#3b82f6}
   .dsm td.used{background:#16a34a}
@@ -241,7 +244,7 @@ const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
-<style>:root{--rowh:320px}${CSS}</style></head>
+<style>:root{--rowh:320px;--colh:170px}${CSS}</style></head>
 <body>
 <header>
   <h1>${title}</h1>
