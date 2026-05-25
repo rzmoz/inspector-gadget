@@ -85,16 +85,73 @@ export function buildModel(config) {
   files.sort(); // deterministic order → stable SVG + clean matrix/report diffs
   const fileSet = new Set(files);
 
-  // ---- resolve a relative import specifier to a known file (null otherwise) ----
-  // Only relative specs are internal. Non-relative specs (packages) never map to
-  // a scanned file — they're handled as third-party references below.
-  function resolve(fromFile, spec) {
-    if (!spec.startsWith('.')) return null;
-    const base = posix.normalize(posix.join(posix.dirname(fromFile), spec));
+  // ---- cross-context path aliases, auto-read from each context's tsconfig ----
+  // tsconfig `compilerOptions.paths` (e.g. "@peek-view" → "../TOW.BattleBuddy/
+  // src/peek-view") are the project's own source of truth for non-relative
+  // imports that point at OTHER contexts. Reading them lets such imports resolve
+  // to first-party files (cross-context) instead of looking like third-party.
+  // string-aware jsonc → json: strip // and /* */ comments OUTSIDE strings (so
+  // glob paths like "@x/*" / "src/**/*.ts" survive), then drop trailing commas.
+  const stripJsonc = (s) => {
+    let out = '', i = 0, inStr = false, q = '';
+    while (i < s.length) {
+      const ch = s[i], nx = s[i + 1];
+      if (inStr) { out += ch; if (ch === '\\') { out += nx ?? ''; i += 2; continue; } if (ch === q) inStr = false; i++; continue; }
+      if (ch === '"' || ch === "'") { inStr = true; q = ch; out += ch; i++; continue; }
+      if (ch === '/' && nx === '/') { while (i < s.length && s[i] !== '\n') i++; continue; }
+      if (ch === '/' && nx === '*') { i += 2; while (i < s.length && !(s[i] === '*' && s[i + 1] === '/')) i++; i += 2; continue; }
+      out += ch; i++;
+    }
+    return out.replace(/,(\s*[}\]])/g, '$1');
+  };
+  const readJsonc = (p) => { try { return JSON.parse(stripJsonc(readFileSync(p, 'utf8'))); } catch { return null; } };
+  const aliasOf = new Map(); // context → [{ isWild, key|prefix, target }] (target repo-root POSIX, may hold '*')
+  for (const c of contextDirs) {
+    const list = [];
+    let tsfiles = [];
+    try { tsfiles = readdirSync(join(root, c)).filter((n) => /^tsconfig.*\.json$/.test(n)); } catch { /* none */ }
+    for (const tf of tsfiles) {
+      const cfg = readJsonc(join(root, c, tf));
+      const paths = cfg?.compilerOptions?.paths;
+      if (!paths) continue;
+      const baseRel = cfg.compilerOptions.baseUrl ? posix.normalize(posix.join(c, cfg.compilerOptions.baseUrl.split('\\').join('/'))) : c;
+      for (const [key, arr] of Object.entries(paths)) {
+        if (!Array.isArray(arr) || !arr.length) continue;
+        const target = posix.normalize(posix.join(baseRel, String(arr[0]).split('\\').join('/')));
+        if (key.endsWith('/*')) list.push({ isWild: true, prefix: key.slice(0, -2), target });
+        else list.push({ isWild: false, key, target });
+      }
+    }
+    if (list.length) aliasOf.set(c, list);
+  }
+
+  // ---- resolve an import specifier to a scanned file (null otherwise) ----
+  // Relative specs resolve against the importing file; non-relative specs are
+  // tried against the importing file's context aliases (above); anything else is
+  // third-party. `.js` specifiers map back to `.ts` source; bare dirs to index.
+  const resolveFile = (base) => {
     const noJs = base.replace(/\.js$/, '');
     for (const b of [base, noJs]) {
       for (const c of [b, b + '.ts', b + '.tsx', b + '/index.ts', b + '/index.tsx']) {
         if (fileSet.has(c)) return c;
+      }
+    }
+    return null;
+  };
+  function resolve(fromFile, spec) {
+    if (spec.startsWith('.')) return resolveFile(posix.normalize(posix.join(posix.dirname(fromFile), spec)));
+    const aliases = aliasOf.get(fileCtx.get(fromFile));
+    if (aliases) {
+      for (const a of aliases) {
+        if (a.isWild) {
+          if (spec.startsWith(a.prefix + '/')) {
+            const hit = resolveFile(posix.normalize(a.target.replace(/\*/, spec.slice(a.prefix.length + 1))));
+            if (hit) return hit;
+          }
+        } else if (spec === a.key) {
+          const hit = resolveFile(posix.normalize(a.target));
+          if (hit) return hit;
+        }
       }
     }
     return null;
@@ -149,6 +206,11 @@ export function buildModel(config) {
   const tpEdges = [];
   const tpSeen = new Set();
   const tpPkgs = new Set();
+  // type-only CROSS-CONTEXT edges — graph-only (e.g. a context → a type contract
+  // such as @tow/abstractions). Kept OUT of `edges`/SCC so they create no runtime
+  // cycles, but surfaced to the graph so contract contexts show as depended-upon.
+  const typeXctxEdges = [];
+  const txSeen = new Set();
   function addExternal(f, spec) {
     if (spec.startsWith('.')) return; // relative-but-unresolved (asset/json) → ignore
     const pkg = pkgRoot(spec);
@@ -165,8 +227,11 @@ export function buildModel(config) {
     while ((m = fromRe.exec(src))) {
       const typeOnly = /^\s+type\b/.test(m[1]); // `import type`/`export type` → erased at build
       const tgt = resolve(f, m[2]);
-      if (tgt) { if (!typeOnly) addInternal(f, tgt); } // type-only internal still excluded
-      else addExternal(f, m[2]);                       // external ref (type-only counts)
+      if (!tgt) { addExternal(f, m[2]); continue; } // unresolved non-relative → third-party
+      if (!typeOnly) addInternal(f, tgt);            // value import → first-party edge
+      else if (fileCtx.get(f) !== fileCtx.get(tgt) && tgt !== f) { // type-only cross-context → graph-only
+        const k = f + '>' + tgt; if (!txSeen.has(k)) { txSeen.add(k); typeXctxEdges.push([f, tgt]); }
+      }
     }
     sideRe.lastIndex = 0;
     while ((m = sideRe.exec(src))) { const t = resolve(f, m[1]); if (t) addInternal(f, t); else addExternal(f, m[1]); }
@@ -208,5 +273,6 @@ export function buildModel(config) {
     allGroups, allCtx, gAdj, byGroup, groupsByCtx,
     contextOf, ctxColour, groupOf, colourOf, CONTEXTS,
     thirdParty: { packages: [...tpPkgs].sort(), edges: tpEdges },
+    typeXctxEdges,
   };
 }

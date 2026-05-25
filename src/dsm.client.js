@@ -100,10 +100,10 @@
     for (let c = 0; c < nC; c++) h += `<th class="colh${colB[c] ? ' ' + colB[c] : ''}" data-c="${c}" title="${esc(N[visCols[c]].title)}" style="background:${CC[N[visCols[c]].ctx] || ''}"><div class="chl"><span class="cname">${esc(N[visCols[c]].label)}</span><span class="cnum">${c + 1}</span></div></th>`;
     h += '</tr></thead><tbody>';
     for (let r = 0; r < nR; r++) {
-      const R = visRows[r], rn = N[R];
+      const R = visRows[r], rn = N[R], rtp = rn.tp ? ' tpcell' : '';
       const tog = rn.kind === 'file' ? '<span class="tog sp">•</span>' : `<span class="tog">${expanded[R] ? '▾' : '▸'}</span>`;
       const pad = 8 + rn.depth * 15;
-      h += `<tr data-r="${r}"><th class="rowh k-${rn.kind}${rowB[r] ? ' ' + rowB[r] : ''}" data-id="${R}" data-r="${r}" title="${esc(rn.title)}" style="background:${CC[rn.ctx] || ''};padding-left:${pad}px">${tog}${rn.kind === 'context' ? `<i style="background:${rn.colour}"></i>` : ''}<span class="num">${r + 1}</span>${esc(rn.label)}</th>`;
+      h += `<tr data-r="${r}"><th class="rowh k-${rn.kind}${rowB[r] ? ' ' + rowB[r] : ''}" data-id="${R}" data-r="${r}" title="${esc(rn.title)}" style="background:${CC[rn.ctx] || ''};padding-left:${pad}px">${tog}<span class="num">${r + 1}</span>${esc(rn.label)}</th>`;
       for (let c = 0; c < nC; c++) {
         const C = visCols[c];
         const bnd = (rowB[r] ? ' ' + rowB[r] : '') + (colB[c] ? ' ' + colB[c] : '');
@@ -116,7 +116,7 @@
         else if (u) { cls = 'used'; txt = u.w; }
         else if (state.mode === 'indirect') { if (indSet.has(R + '>' + C)) cls = 'dep ind'; else if (indSet.has(C + '>' + R)) cls = 'used ind'; }
         if ((d || u) && shareCycle(R, C)) cls += ' cyc';
-        h += `<td class="${cls}${bnd}" data-r="${r}" data-c="${c}">${txt}</td>`;
+        h += `<td class="${cls}${bnd}${rtp}" data-r="${r}" data-c="${c}">${txt}</td>`;
       }
       h += '</tr>';
     }
@@ -205,7 +205,8 @@
   document.querySelectorAll('[data-ctl] button').forEach((b) => b.addEventListener('click', () => { state[b.parentElement.dataset.ctl] = b.dataset.val; render(); }));
   document.querySelectorAll('#xpand button').forEach((b) => b.addEventListener('click', () => {
     const all = b.dataset.act === 'expand';
-    for (const id in N) { const k = N[id].kind; if (k === 'context') expanded[id] = all; else if (k === 'namespace') expanded[id] = all; }
+    // contexts stay expanded (always shown, like the graph); only namespaces toggle
+    for (const id in N) { const k = N[id].kind; if (k === 'context') expanded[id] = true; else if (k === 'namespace') expanded[id] = all; }
     render();
   }));
 

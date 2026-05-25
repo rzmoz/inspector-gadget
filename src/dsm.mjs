@@ -27,7 +27,7 @@ const config = loadConfig();
 const {
   files, edges, allCtx, allGroups, byGroup, CONTEXTS,
   contextOf, ctxColour, groupOf, colourOf,
-  fileScc, groupScc, ctxScc, thirdParty,
+  fileScc, groupScc, ctxScc, thirdParty, typeXctxEdges,
 } = buildModel(config);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -196,6 +196,10 @@ for (const [a, b] of edges) {
   const fileCyc = fileScc.id.get(a) === fileScc.id.get(b) && fileScc.size(a) > 1;
   gFileEdges.push({ s: 'f:' + fIndex.get(a), t: 'f:' + fIndex.get(b), ns1: 'n:' + na, ns2: 'n:' + nb, ctx1: 'c:' + contextOf(a), ctx2: 'c:' + contextOf(b), nsCyc, fileCyc });
 }
+// type-only cross-context edges — graph-only (kept out of edges/SCC); always crossCtx
+for (const [a, b] of typeXctxEdges) {
+  gFileEdges.push({ s: 'f:' + fIndex.get(a), t: 'f:' + fIndex.get(b), ns1: 'n:' + groupOf(a), ns2: 'n:' + groupOf(b), ctx1: 'c:' + contextOf(a), ctx2: 'c:' + contextOf(b), nsCyc: false, fileCyc: false });
+}
 const graph = { nodes: gNodes, fileEdges: gFileEdges };
 
 const payload = { nodes, roots, edges: [...edgeIdx, ...tpEdgeIdx], filePaths: [...files, ...packages], fileComp, cycleComps, reachPairs, contexts, thirdPartyCtxId: packages.length ? tpCtxId : null, fileCount: files.length, edgeCount: edges.length, tpCount: packages.length, graph };
@@ -234,7 +238,8 @@ const CSS = `
   .dsm th.rowh{position:sticky;left:0;z-index:1;background:#f8fafc;text-align:left;white-space:nowrap;max-width:var(--rowh);min-width:var(--rowh);width:var(--rowh);overflow:hidden;text-overflow:ellipsis;padding:0 8px;font-weight:500}
   .dsm th.rowh i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:0;border:1px solid #00000022}
   .dsm th.rowh b{color:#94a3b8;font-weight:600;margin-right:4px}
-  .dsm td{width:25px;height:25px;min-width:25px;text-align:center;cursor:pointer;color:#fff;font-weight:600;background:#e4e9f0}
+  .dsm td{width:25px;height:25px;min-width:25px;text-align:center;cursor:pointer;color:#fff;font-weight:600;background:#ffffff}
+  .dsm td.tpcell{background:#f3ebfc}
   .dsm td.diag{cursor:default;color:#00000055;font-weight:400}
   .dsm td.dep{background:#3b82f6}
   .dsm td.used{background:#16a34a}

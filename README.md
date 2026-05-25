@@ -72,15 +72,26 @@ section), not configured.
 Context and namespace **colours** are assigned automatically from fixed pastel
 palettes (by sorted name), so output is deterministic across runs.
 
+### Cross-context resolution (tsconfig `paths`)
+
+Non-relative imports are first matched against the importing context's tsconfig
+`paths` — each context's own `tsconfig*.json` `compilerOptions.paths` is read
+automatically (no config here). A path-alias that targets another context (e.g.
+`@peek-view` → `../TOW.BattleBuddy/src/peek-view`) resolves to that context's
+files, producing a **cross-context first-party edge**. Type-only cross-context
+imports (e.g. a `@tow/abstractions` contract) don't enter the file graph / cycle
+analysis, but are surfaced to the **Graph** tab so contract contexts still show
+as depended-upon.
+
 ### Third-party references
 
-Non-relative imports that don't resolve to a scanned file are collected as
-**third-party reference nodes** — one per package root (`react`, `@scope/name`,
-…). In the DSM they form a purple `(third-party)` context pinned to the bottom,
-switchable with the **3rd-party / hide** toggle. `node:` builtins are ignored;
-`import type … from 'pkg'` counts (a type-only import is still a real reference).
-They are pure sinks, so they never enter cycle analysis, and they appear only on
-the matrix row axis — the Graph tab is first-party only.
+Non-relative imports that resolve to neither a relative file nor a tsconfig
+path-alias are collected as **third-party reference nodes** — one per package
+root (`react`, `@scope/name`, …). In the DSM they form a purple `(third-party)`
+context pinned to the bottom, switchable with the **3rd-party / hide** toggle.
+`node:` builtins are ignored; `import type … from 'pkg'` counts. They are pure
+sinks, so they never enter cycle analysis, and they appear only on the matrix
+row axis — the Graph tab is first-party (incl. cross-context) only.
 
 ## Layout
 
