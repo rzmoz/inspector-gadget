@@ -21,8 +21,9 @@ are not runtime dependencies and must not form cycles).
 ## Usage
 
 The tool is generic; all project-specifics live in an `inspector.gadget.json` in
-the **project** being analysed. That file's directory is the project root
-(source roots resolve relative to it) and outputs default there.
+the **project** being analysed. That file's directory is the project root — it
+is scanned to **derive** contexts, source roots and namespaces (see below) and
+outputs default there.
 
 ```
 node /path/to/inspector.gadget/bin/cli.mjs [graph|dsm|all] [--config <path>]
@@ -34,20 +35,16 @@ emits both. (If linked via `npm link`, the `inspector.gadget` bin runs anywhere.
 
 ## `inspector.gadget.json`
 
+Every key is optional — a bare `{}` works. The file only declares scan mechanics
+and cosmetics; the three **levels** are derived from the directory tree (next
+section), not configured.
+
 ```jsonc
 {
   "title": "My Project · Dependency Structure Matrix",   // DSM <title>/<h1>
-  "srcRoots": ["packages/a/src", "packages/b/src"],       // scanned dirs (relative to this file)
   "aliases": { "@app": "packages/a/src" },                // non-relative import aliases → repo-relative path
-  "exclude": ["node_modules", "dist", "build"],           // directory names skipped while walking
+  "exclude": ["node_modules", "dist", "build"],           // directory names skipped while walking (REPLACES the default, not merged)
   "includeDts": ["contracts/index.d.ts"],                 // .d.ts files to include (otherwise .d.ts is skipped)
-  "contexts": [                                           // bounded contexts (first match wins)
-    { "match": "^packages/a/", "name": "A", "colour": "#eaf2ff" }
-  ],
-  "namespaces": [                                         // namespaces within contexts (specific before general)
-    { "match": "^packages/a/src/core/", "name": "A · core", "colour": "#cfe8ff" },
-    { "match": "^packages/a/src/", "name": "A · app", "colour": "#f0f0f0" }
-  ],
   "output": {
     "dir": ".",                                           // default: same dir as this file
     "graph": "codebase-graph.namespaces.svg",
@@ -58,10 +55,21 @@ emits both. (If linked via `npm link`, the `inspector.gadget` bin runs anywhere.
 }
 ```
 
-`match` strings are compiled with `new RegExp(...)` and tested against
-repo-root-relative POSIX paths (e.g. `packages/a/src/core/x.ts`). `contexts` and
-`namespaces` are evaluated **in order** — list specific patterns before general
-catch-alls.
+### Levels are derived from the layout
+
+- **Context** — each immediate child directory of the settings-file dir (the
+  project root), skipping `exclude` names and dot-dirs. A context with no
+  scannable `.ts`/`.tsx` simply never appears.
+- **Source root** (per context) — the context's `src/` subdir if it exists, else
+  the context dir itself (e.g. a `.d.ts`-only contract package). This is what
+  replaces the old `srcRoots`: only each context's source root is walked, so
+  sibling `tests/`, `__tests__/` and loose config files stay out of the graph.
+- **Namespace** — the first path segment beneath the source root; files sitting
+  directly in the source root fall into `(root)`. Names are context-qualified
+  for uniqueness, e.g. `A · core`, `A · (root)`.
+
+Context and namespace **colours** are assigned automatically from fixed pastel
+palettes (by sorted name), so output is deterministic across runs.
 
 ## Layout
 

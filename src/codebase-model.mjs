@@ -1,14 +1,16 @@
 // Shared codebase model — the analysis half of the tool. Walks every .ts/.tsx
-// under the configured source roots (+ any explicitly-included .d.ts), resolves
+// under the derived source roots (+ any explicitly-included .d.ts), resolves
 // the codebase's own relative + aliased imports into a file-dependency graph,
 // clusters files into namespaces inside bounded contexts, and runs Tarjan SCC
 // at all three levels (file / namespace / context). Pure Node built-ins — NO
 // Graphviz. Imported by both graph.mjs (SVG) and dsm.mjs (matrix) so the two
 // tools share ONE definition of "the codebase" and never drift.
 //
-// `buildModel(config)` is pure w.r.t. the config object — all project-specifics
-// (roots, aliases, contexts, namespaces) come from inspector.gadget.json.
-import { readFileSync, readdirSync } from 'node:fs';
+// `buildModel(config)` derives contexts (top-level dirs), source roots (each
+// context's `src/`, else itself) and namespaces (first segment below the source
+// root) from the directory tree; only aliases / exclude / includeDts / title /
+// output come from inspector.gadget.json.
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, posix } from 'node:path';
 
 // ---- Tarjan SCC (generic) ----
@@ -34,27 +36,50 @@ export function sccOf(nodes, adj) {
 }
 
 export function buildModel(config) {
-  const { root, srcRoots, aliases, exclude, includeDts, contexts, namespaces } = config;
+  const { root, aliases, exclude, includeDts } = config;
   const rel = (p) => relative(root, p).split('\\').join('/');
 
-  // ---- collect source files ----
+  // ---- discover bounded contexts + their source roots from the directory tree ----
+  // Each immediate child dir of the project root (the settings-file dir) is a
+  // bounded CONTEXT — skipping excluded names and dot-dirs. A context's SOURCE
+  // ROOT is its `src/` subdir if present, else the context dir itself (e.g. a
+  // `.d.ts`-only contract package). This replaces the old `srcRoots` config:
+  // the scan scope is DERIVED from the layout, not declared.
+  const isDir = (p) => { try { return statSync(p).isDirectory(); } catch { return false; } };
+  const contextDirs = readdirSync(root, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !exclude.includes(e.name))
+    .map((e) => e.name)
+    .sort();
+  const srcRootOf = new Map(contextDirs.map((c) => [c, isDir(join(root, c, 'src')) ? `${c}/src` : c]));
+
+  // ---- collect source files, tagging each with its context + namespace ----
+  // CONTEXT = the top-level dir. NAMESPACE = first path segment beneath the
+  // source root (files directly in the source root → "(root)"), qualified by
+  // context so names are unique and group cleanly (e.g. "TOW.EDB · pipeline").
   const files = [];
-  function walk(dir) {
+  const fileCtx = new Map();
+  const fileNs = new Map();
+  function walk(dir, ctx, srcRoot) {
     let entries;
     try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       const p = join(dir, e.name);
       if (e.isDirectory()) {
         if (exclude.includes(e.name)) continue;
-        walk(p);
+        walk(p, ctx, srcRoot);
       } else if (/\.(ts|tsx)$/.test(e.name)) {
         // include .ts/.tsx; skip .d.ts EXCEPT explicitly listed ones (contracts).
         const r = rel(p);
-        if (!e.name.endsWith('.d.ts') || includeDts.includes(r)) files.push(r);
+        if (e.name.endsWith('.d.ts') && !includeDts.includes(r)) continue;
+        files.push(r);
+        fileCtx.set(r, ctx);
+        const rest = r.startsWith(srcRoot + '/') ? r.slice(srcRoot.length + 1) : r;
+        const slash = rest.indexOf('/');
+        fileNs.set(r, `${ctx} · ${slash >= 0 ? rest.slice(0, slash) : '(root)'}`);
       }
     }
   }
-  for (const r of srcRoots) walk(join(root, r));
+  for (const c of contextDirs) walk(join(root, srcRootOf.get(c)), c, srcRootOf.get(c));
   files.sort(); // deterministic order → stable SVG + clean matrix/report diffs
   const fileSet = new Set(files);
 
@@ -78,13 +103,21 @@ export function buildModel(config) {
     return null;
   }
 
-  // ---- contexts + namespaces (from config) ----
-  const contextOf = (f) => (contexts.find((c) => c.re.test(f))?.name) ?? 'other';
-  const ctxColour = (n) => (contexts.find((c) => c.name === n)?.colour) ?? '#ffffff';
-  const groupOf = (f) => (namespaces.find((g) => g.re.test(f))?.name) ?? 'other';
-  const colourOf = (g) => (namespaces.find((g2) => g2.name === g)?.colour) ?? '#ffffff';
-  // [re, name, colour] tuples — graph.mjs / dsm.mjs iterate this for layout order.
-  const CONTEXTS = contexts.map((c) => [c.re, c.name, c.colour]);
+  // ---- contexts + namespaces (auto-derived; colours from deterministic palettes) ----
+  // Hand-picked tints are gone: contexts/namespaces are coloured by sorted name
+  // from fixed pastel palettes (cycled), so output stays stable across runs.
+  const CTX_PALETTE = ['#eaf2ff', '#fdeef0', '#ecfbef', '#fff5d6', '#f3e8ff', '#e6fbfb', '#fef3e2', '#eef2f7'];
+  const NS_PALETTE = ['#cfe8ff', '#ffd1dc', '#d6f5d6', '#ffe9a6', '#e6c9e0', '#cfe8e0', '#ffdfba', '#d9d9d9', '#ffc9c9', '#cce5ff', '#ffe0b3', '#ffb3ba', '#c9e4ff', '#d6d6f5', '#f5d6d6', '#d6f5ec'];
+  const usedCtx = [...new Set(files.map((f) => fileCtx.get(f)))].sort();
+  const usedNs = [...new Set(files.map((f) => fileNs.get(f)))].sort();
+  const ctxColourMap = new Map(usedCtx.map((c, i) => [c, CTX_PALETTE[i % CTX_PALETTE.length]]));
+  const nsColourMap = new Map(usedNs.map((g, i) => [g, NS_PALETTE[i % NS_PALETTE.length]]));
+  const contextOf = (f) => fileCtx.get(f) ?? 'other';
+  const ctxColour = (n) => ctxColourMap.get(n) ?? '#ffffff';
+  const groupOf = (f) => fileNs.get(f) ?? 'other';
+  const colourOf = (g) => nsColourMap.get(g) ?? '#ffffff';
+  // [_, name, colour] tuples in sorted context order — graph.mjs / dsm.mjs read name (+colour).
+  const CONTEXTS = usedCtx.map((c) => [c, c, ctxColourMap.get(c)]);
 
   // ---- build edges (file → file import dependencies) ----
   // Whole-statement type-only imports/exports (`import type … from`,
