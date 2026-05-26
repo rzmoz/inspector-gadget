@@ -1,6 +1,6 @@
-# inspector.gadget — codebase guide
+# inspector-morse — codebase guide
 
-Config-driven codebase **dependency viewer**. Reads an `inspector.gadget.json`
+Config-driven codebase **dependency viewer**. Reads an `inspector-morse.json`
 in a *target* project and emits one self-contained `codebase-dsm.html` with two
 interactive tabs — a Dependency Structure **Matrix** and a Cytoscape dependency
 **Graph**. No build step; the HTML opens straight from `file://`. Pure ESM
@@ -10,8 +10,8 @@ interactive tabs — a Dependency Structure **Matrix** and a Cytoscape dependenc
 - `node bin/cli.mjs [graph|dsm|all] [--config <path>]` — all three commands emit
   the same combined viewer (names kept for familiarity).
 - `npm run all | dsm | graph`.
-- Config resolution: `--config`, else `$IG_CONFIG_PATH`, else nearest
-  `inspector.gadget.json` walking up from cwd. Its directory is the project root.
+- Config resolution: `--config`, else `$IM_CONFIG_PATH`, else nearest
+  `inspector-morse.json` walking up from cwd. Its directory is the project root.
 
 ## Files
 - `bin/cli.mjs` — CLI dispatch; imports `src/dsm.mjs` (self-runs on import).
@@ -40,7 +40,7 @@ interactive tabs — a Dependency Structure **Matrix** and a Cytoscape dependenc
 - **Cross-context resolution** = each context's `tsconfig*.json`
   `compilerOptions.paths` is auto-read (string-aware jsonc parse) to resolve
   non-relative imports that target sibling contexts → cross-context first-party
-  edges. No alias config lives in `inspector.gadget.json`.
+  edges. No alias config lives in `inspector-morse.json`.
 - **Edges**: value imports → `edges` (feed matrix + SCC + graph). Whole-statement
   `import type` / `export type` excluded from `edges`. **Exception**: type-only
   *cross-context* imports go to `typeXctxEdges` — graph-only, kept out of SCC so
@@ -73,7 +73,7 @@ interactive tabs — a Dependency Structure **Matrix** and a Cytoscape dependenc
 - Verify visual / HTML changes in a real browser: serve the target dir with a
   tiny static server + a `.claude/launch.json`, then use the preview tooling.
   Screenshots may time out (Cytoscape's render loop) — verify via DOM `eval`
-  instead (check globals, node/edge counts, run `IGGraph` methods, read console
+  instead (check globals, node/edge counts, run `IMGraph` methods, read console
   errors). Remove the throwaway server/launch.json afterwards.
 - The shared model must stay framework-free (Node built-ins only) so both
   renderers and the CLI keep working without a build step.

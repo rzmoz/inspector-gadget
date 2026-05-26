@@ -11,7 +11,7 @@
 // `buildModel(config)` derives contexts (top-level dirs), source roots (each
 // context's `src/`, else itself) and namespaces (first segment below the source
 // root) from the directory tree; only exclude / includeDts / title / output
-// come from inspector.gadget.json.
+// come from inspector-morse.json.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, posix } from 'node:path';
 

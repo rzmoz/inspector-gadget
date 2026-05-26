@@ -1,10 +1,10 @@
-# inspector.gadget
+# inspector-morse
 
 Tooling for code inspection on various tech-stacks — relevant in the AI era where
 manual coding is almost absent but understanding of code is ever as relevant.
 
 Config-driven **codebase dependency** tooling. Point it at an
-`inspector.gadget.json` and it emits a single self-contained
+`inspector-morse.json` and it emits a single self-contained
 **`codebase-dsm.html`** (no runtime; opens from `file://`) with two tabs:
 
 - **Matrix** — an interactive NDepend-style **Dependency Structure Matrix**,
@@ -23,22 +23,22 @@ type-only imports of *external* packages still count as third-party references
 
 ## Usage
 
-The tool is generic; all project-specifics live in an `inspector.gadget.json` in
+The tool is generic; all project-specifics live in an `inspector-morse.json` in
 the **project** being analysed. That file's directory is the project root — it
 is scanned to **derive** contexts, source roots and namespaces (see below) and
 outputs default there.
 
 ```
-node /path/to/inspector.gadget/bin/cli.mjs [graph|dsm|all] [--config <path>]
+node /path/to/inspector-morse/bin/cli.mjs [graph|dsm|all] [--config <path>]
 ```
 
-The config is found via `--config`, else `$IG_CONFIG_PATH`, else the nearest
-`inspector.gadget.json` walking up from the current directory. `graph`, `dsm`
+The config is found via `--config`, else `$IM_CONFIG_PATH`, else the nearest
+`inspector-morse.json` walking up from the current directory. `graph`, `dsm`
 and `all` all emit the same combined viewer (the names are kept for
-familiarity). (If linked via `npm link`, the `inspector.gadget` bin runs
+familiarity). (If linked via `npm link`, the `inspector-morse` bin runs
 anywhere.)
 
-## `inspector.gadget.json`
+## `inspector-morse.json`
 
 Every key is optional — a bare `{}` works. The file only declares scan mechanics
 and cosmetics; the three **levels** are derived from the directory tree (next
@@ -96,7 +96,7 @@ row axis — the Graph tab is first-party (incl. cross-context) only.
 ## Layout
 
 - `bin/cli.mjs` — CLI entry / dispatch.
-- `src/config.mjs` — load + validate `inspector.gadget.json`.
+- `src/config.mjs` — load + validate `inspector-morse.json`.
 - `src/codebase-model.mjs` — `buildModel(config)`: scan, resolve, cluster, SCC.
 - `src/dsm.mjs` — assembles the combined viewer HTML; inlines the matrix client,
   the graph client, and Cytoscape + fcose from `node_modules`.

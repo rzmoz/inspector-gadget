@@ -315,11 +315,11 @@ const html = `<!doctype html>
     const t = b.dataset.tab;
     mp.style.display = t === 'matrix' ? '' : 'none';
     gp.style.display = t === 'graph' ? '' : 'none';
-    if (t === 'graph' && window.IGGraph) { IGGraph.init(document.getElementById('cy')); IGGraph.resize(); IGGraph.fit(); }
+    if (t === 'graph' && window.IMGraph) { IMGraph.init(document.getElementById('cy')); IMGraph.resize(); IMGraph.fit(); }
   }));
   document.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => {
-    if (!window.IGGraph) return;
-    ({ expand: IGGraph.expandAll, collapse: IGGraph.collapseAll, fit: IGGraph.fit, relayout: IGGraph.relayout }[b.dataset.g] || (() => {}))();
+    if (!window.IMGraph) return;
+    ({ expand: IMGraph.expandAll, collapse: IMGraph.collapseAll, fit: IMGraph.fit, relayout: IMGraph.relayout }[b.dataset.g] || (() => {}))();
   }));
 })();
 </script>

@@ -1,4 +1,4 @@
-// Loads inspector.gadget.json — the per-project settings file. The tool itself
+// Loads inspector-morse.json — the per-project settings file. The tool itself
 // is generic; the JSON carries walk excludes, included .d.ts contracts, the DSM
 // title and output names. The file's own directory is the
 // project ROOT: contexts, source roots and namespaces are DERIVED from the tree
@@ -6,7 +6,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 
-const CONFIG_NAME = 'inspector.gadget.json';
+const CONFIG_NAME = 'inspector-morse.json';
 
 function findUp(name, from) {
   let dir = resolve(from);
@@ -21,11 +21,11 @@ function findUp(name, from) {
 
 /**
  * Resolve + parse the settings file.
- * @param {string} [explicitPath] from `--config`; else $IG_CONFIG_PATH; else
- *   the nearest inspector.gadget.json walking up from cwd.
+ * @param {string} [explicitPath] from `--config`; else $IM_CONFIG_PATH; else
+ *   the nearest inspector-morse.json walking up from cwd.
  */
 export function loadConfig(explicitPath) {
-  const found = explicitPath || process.env.IG_CONFIG_PATH || findUp(CONFIG_NAME, process.cwd());
+  const found = explicitPath || process.env.IM_CONFIG_PATH || findUp(CONFIG_NAME, process.cwd());
   if (!found) {
     throw new Error(`${CONFIG_NAME} not found — pass --config <path> or run from a directory that contains it.`);
   }

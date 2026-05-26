@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// inspector.gadget CLI.
+// inspector-morse CLI.
 //
-//   inspector.gadget [graph|dsm|all] [--config <path>]
+//   inspector-morse [graph|dsm|all] [--config <path>]
 //
-// Resolves the settings file (--config, else $IG_CONFIG_PATH, else the nearest
-// inspector.gadget.json walking up from the current directory). Outputs default
+// Resolves the settings file (--config, else $IM_CONFIG_PATH, else the nearest
+// inspector-morse.json walking up from the current directory). Outputs default
 // to that file's directory. All three commands now emit the same single
 // combined viewer (Matrix + Graph tabs); the names are kept for familiarity.
 import { resolve } from 'node:path';
@@ -12,10 +12,10 @@ import { resolve } from 'node:path';
 const args = process.argv.slice(2);
 const cmd = args.find((a) => !a.startsWith('-')) ?? 'all';
 const ci = args.indexOf('--config');
-if (ci >= 0 && args[ci + 1]) process.env.IG_CONFIG_PATH = resolve(args[ci + 1]);
+if (ci >= 0 && args[ci + 1]) process.env.IM_CONFIG_PATH = resolve(args[ci + 1]);
 
 if (!['graph', 'dsm', 'all'].includes(cmd)) {
-  console.error(`unknown command "${cmd}". usage: inspector.gadget [graph|dsm|all] [--config <path>]`);
+  console.error(`unknown command "${cmd}". usage: inspector-morse [graph|dsm|all] [--config <path>]`);
   process.exit(1);
 }
 
