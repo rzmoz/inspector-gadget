@@ -1,23 +1,25 @@
 # inspector-morse — codebase guide
 
-Config-driven codebase **dependency viewer**. Reads an `inspector-morse.json`
-in a *target* project and emits one self-contained `codebase-dsm.html` with two
-interactive tabs — a Dependency Structure **Matrix** and a Cytoscape dependency
-**Graph**. No build step; the HTML opens straight from `file://`. Pure ESM
-(`.mjs`); the analysis half uses only Node built-ins.
+Config-free codebase **dependency viewer**. Scans a target project (passed via
+`--code-root`) and emits one self-contained `codebase-dsm.html` (into that root) with
+two interactive tabs — a Dependency Structure **Matrix** and a Cytoscape
+dependency **Graph**. No build step; the HTML opens straight from `file://`. Pure
+ESM (`.mjs`); the analysis half uses only Node built-ins.
 
 ## Run
-- `node bin/cli.mjs [graph|dsm|all] [--config <path>]` — all three commands emit
-  the same combined viewer (names kept for familiarity).
-- `npm run all | dsm | graph`.
-- Config resolution: `--config`, else `$IM_CONFIG_PATH`, else nearest
-  `inspector-morse.json` walking up from cwd. Its directory is the project root.
+- `node bin/cli.mjs <node|dotnet> --code-root <dir> [-h|--help]`.
+- `node` scans a TS/Node project; `dotnet` errors (not implemented). `--code-root` is
+  required (no default); the viewer is written into it and titled by its dir name.
+- No config file — all settings are CLI args + built-in defaults (`src/args.mjs`).
 
 ## Files
-- `bin/cli.mjs` — CLI dispatch; imports `src/dsm.mjs` (self-runs on import).
-- `src/config.mjs` — loads the settings file. Keys (all optional): `title`,
-  `exclude`, `includeDts`, `output.dir`, `output.dsm`. No `srcRoots`, `contexts`,
-  `namespaces`, or `aliases` — those are all derived (see below).
+- `bin/cli.mjs` — entry: validates the `node|dotnet` command + `--code-root`, handles
+  `--help`, then imports `src/dsm.mjs` (self-runs on import).
+- `src/args.mjs` — `parseCli(argv)`: parses the command + `--code-root`, applies node
+  defaults (`exclude` = node_modules/dist/build, `title` = root dir name, output
+  = `<root>/codebase-dsm.html`), returns `{ command, help, root, config }`. No
+  config file is read; `srcRoots`, `contexts`, `namespaces`, `aliases` are all
+  derived (see below).
 - `src/codebase-model.mjs` — `buildModel(config)`: the whole analysis. Scans
   `.ts/.tsx`, resolves imports, clusters, runs Tarjan SCC at file/namespace/
   context levels. Shared by both tabs — one definition of "the codebase".
@@ -27,20 +29,22 @@ interactive tabs — a Dependency Structure **Matrix** and a Cytoscape dependenc
   graph payload; the matrix *cells/colours/cycles* are aggregated client-side
   from those edges, so the server side stays ordering + plumbing only. Inlines
   `dsm.client.js`, `graph.client.js`, and Cytoscape + fcose from `node_modules`.
-  Writes `output.dsm`.
+  Writes the viewer to `<code-root>/codebase-dsm.html` (`config.output.dsm`).
 - `src/dsm.client.js` — **Matrix** renderer (vanilla DOM).
 - `src/graph.client.js` — **Graph** renderer (Cytoscape).
 
 ## Model conventions (everything derived from the target's layout)
-- **Context** = each top-level dir under the config file (minus `exclude` names
-  and dot-dirs); a context with no `.ts/.tsx` never appears.
+- **Context** = each top-level dir under `--code-root` (minus `exclude` names and
+  dot-dirs); a context with no `.ts/.tsx` never appears.
 - **Source root** per context = its `src/` if present, else the dir itself.
 - **Namespace** = first path segment below the source root; root files → `(root)`.
   Names are context-qualified, e.g. `TOW.EDB · pipeline`.
+- **Scan scope** = all `.ts/.tsx` including `.d.ts` (node always scans type
+  declarations); only `exclude` names + dot-dirs are skipped.
 - **Cross-context resolution** = each context's `tsconfig*.json`
   `compilerOptions.paths` is auto-read (string-aware jsonc parse) to resolve
   non-relative imports that target sibling contexts → cross-context first-party
-  edges. No alias config lives in `inspector-morse.json`.
+  edges. There is no alias config — each context's tsconfig is the only source.
 - **Edges**: value imports → `edges` (feed matrix + SCC + graph). Whole-statement
   `import type` / `export type` excluded from `edges`. **Exception**: type-only
   *cross-context* imports go to `typeXctxEdges` — graph-only, kept out of SCC so

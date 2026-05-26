@@ -3,14 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Config-driven codebase dependency viewer. Point it at an inspector-morse.json and it emits a single self-contained HTML with two interactive tabs — an NDepend-style Dependency Structure Matrix and a Cytoscape dependency graph — with file / namespace / context-level cycle (SCC) analysis.",
+  "description": "Config-free CLI that inspects a codebase and emits a single self-contained HTML with two interactive tabs — an NDepend-style Dependency Structure Matrix and a Cytoscape dependency graph — with file / namespace / context-level cycle (SCC) analysis. Run: inspector-morse node --code-root <dir>.",
   "bin": {
     "inspector-morse": "bin/cli.mjs"
-  },
-  "scripts": {
-    "graph": "node bin/cli.mjs graph",
-    "dsm": "node bin/cli.mjs dsm",
-    "all": "node bin/cli.mjs all"
   },
   "dependencies": {
     "cytoscape": "^3.33.4",

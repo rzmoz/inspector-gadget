@@ -5,7 +5,7 @@
 //     namespace / file via expand-collapse.
 //   • Graph — an interactive Cytoscape dependency graph (contexts + namespaces
 //     always shown; click a namespace to reveal/hide its files).
-// Writes <repo>/codebase-dsm.html. Run with `npm run all` / `dsm` / `graph`.
+// Writes codebase-dsm.html into the target root. Run via `bin/cli.mjs node --code-root <dir>`.
 //
 // Reuses the shared ./codebase-model.mjs (one scan / import resolution /
 // clustering / Tarjan SCC). The matrix renderer lives in ./dsm.client.js and the
@@ -20,10 +20,10 @@
 import { writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'node:url';
-import { loadConfig } from './config.mjs';
+import { parseCli } from './args.mjs';
 import { buildModel } from './codebase-model.mjs';
 
-const config = loadConfig();
+const { config } = parseCli();
 const {
   files, edges, allCtx, allGroups, byGroup, contextOrder,
   contextOf, ctxColour, groupOf, colourOf,

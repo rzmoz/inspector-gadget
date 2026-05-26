@@ -1,5 +1,5 @@
 // Shared codebase model — the analysis half of the tool. Walks every .ts/.tsx
-// under the derived source roots (+ any explicitly-included .d.ts), resolves
+// under the derived source roots (including .d.ts type declarations), resolves
 // the codebase's own relative imports into a file-dependency graph, clusters
 // files into namespaces inside bounded contexts, and runs Tarjan SCC at all
 // three levels (file / namespace / context). Non-relative imports that don't
@@ -10,8 +10,8 @@
 //
 // `buildModel(config)` derives contexts (top-level dirs), source roots (each
 // context's `src/`, else itself) and namespaces (first segment below the source
-// root) from the directory tree; only exclude / includeDts / title / output
-// come from inspector-morse.json.
+// root) from the directory tree; the root and exclude list come from CLI args
+// (see bin/cli.mjs) — there is no config file.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, posix } from 'node:path';
 
@@ -38,7 +38,7 @@ export function sccOf(nodes, adj) {
 }
 
 export function buildModel(config) {
-  const { root, exclude, includeDts } = config;
+  const { root, exclude } = config;
   const rel = (p) => relative(root, p).split('\\').join('/');
 
   // ---- discover bounded contexts + their source roots from the directory tree ----
@@ -70,9 +70,8 @@ export function buildModel(config) {
         if (exclude.includes(e.name)) continue;
         walk(p, ctx, srcRoot);
       } else if (/\.(ts|tsx)$/.test(e.name)) {
-        // include .ts/.tsx; skip .d.ts EXCEPT explicitly listed ones (contracts).
+        // include ALL .ts/.tsx — node always scans .d.ts type declarations too.
         const r = rel(p);
-        if (e.name.endsWith('.d.ts') && !includeDts.includes(r)) continue;
         files.push(r);
         fileCtx.set(r, ctx);
         const rest = r.startsWith(srcRoot + '/') ? r.slice(srcRoot.length + 1) : r;

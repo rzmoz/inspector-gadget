@@ -1,24 +1,28 @@
 #!/usr/bin/env node
-// inspector-morse CLI.
+// inspector-morse CLI. Inspects a codebase and writes a self-contained
+// codebase-dsm.html (Matrix + Graph tabs) into the target root.
 //
-//   inspector-morse [graph|dsm|all] [--config <path>]
+//   inspector-morse <node|dotnet> --code-root <dir> [-h|--help]
 //
-// Resolves the settings file (--config, else $IM_CONFIG_PATH, else the nearest
-// inspector-morse.json walking up from the current directory). Outputs default
-// to that file's directory. All three commands now emit the same single
-// combined viewer (Matrix + Graph tabs); the names are kept for familiarity.
-import { resolve } from 'node:path';
+// There is no config file: every setting comes from CLI args + built-in
+// defaults (see src/args.mjs). `node` scans a TypeScript/Node project; `dotnet`
+// is not implemented yet.
+import { parseCli, USAGE } from '../src/args.mjs';
 
-const args = process.argv.slice(2);
-const cmd = args.find((a) => !a.startsWith('-')) ?? 'all';
-const ci = args.indexOf('--config');
-if (ci >= 0 && args[ci + 1]) process.env.IM_CONFIG_PATH = resolve(args[ci + 1]);
-
-if (!['graph', 'dsm', 'all'].includes(cmd)) {
-  console.error(`unknown command "${cmd}". usage: inspector-morse [graph|dsm|all] [--config <path>]`);
+let cli;
+try {
+  cli = parseCli();
+} catch (e) {
+  console.error(`error: ${e.message}\n\n${USAGE}`);
   process.exit(1);
 }
 
-// The renderer self-runs on import (reads the config via loadConfig) and writes
-// the combined Matrix + Graph viewer in one pass.
+if (cli.help) { console.log(USAGE); process.exit(0); }
+if (!cli.command) { console.error(`error: missing target ecosystem (node|dotnet)\n\n${USAGE}`); process.exit(1); }
+if (!['node', 'dotnet'].includes(cli.command)) { console.error(`error: unknown target "${cli.command}" (expected node|dotnet)\n\n${USAGE}`); process.exit(1); }
+if (cli.command === 'dotnet') { console.error('error: dotnet inspection is not implemented'); process.exit(1); }
+if (!cli.root) { console.error(`error: --code-root <dir> is required\n\n${USAGE}`); process.exit(1); }
+
+// The renderer self-runs on import: it re-reads argv (via parseCli) for the
+// config and writes the combined Matrix + Graph viewer in one pass.
 await import('../src/dsm.mjs');

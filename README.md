@@ -3,9 +3,9 @@
 Tooling for code inspection on various tech-stacks — relevant in the AI era where
 manual coding is almost absent but understanding of code is ever as relevant.
 
-Config-driven **codebase dependency** tooling. Point it at an
-`inspector-morse.json` and it emits a single self-contained
-**`codebase-dsm.html`** (no runtime; opens from `file://`) with two tabs:
+**Codebase dependency** tooling. Point it at a project root and it emits a single
+self-contained **`codebase-dsm.html`** (no runtime; opens from `file://`) into
+that root, with two tabs:
 
 - **Matrix** — an interactive NDepend-style **Dependency Structure Matrix**,
   switchable across file / namespace / context via expand-collapse, third-party
@@ -23,48 +23,47 @@ type-only imports of *external* packages still count as third-party references
 
 ## Usage
 
-The tool is generic; all project-specifics live in an `inspector-morse.json` in
-the **project** being analysed. That file's directory is the project root — it
-is scanned to **derive** contexts, source roots and namespaces (see below) and
-outputs default there.
+There is **no config file** — every setting comes from CLI args and built-in
+defaults.
 
 ```
-node /path/to/inspector-morse/bin/cli.mjs [graph|dsm|all] [--config <path>]
+node /path/to/inspector-morse/bin/cli.mjs <node|dotnet> --code-root <dir> [-h|--help]
 ```
 
-The config is found via `--config`, else `$IM_CONFIG_PATH`, else the nearest
-`inspector-morse.json` walking up from the current directory. `graph`, `dsm`
-and `all` all emit the same combined viewer (the names are kept for
-familiarity). (If linked via `npm link`, the `inspector-morse` bin runs
-anywhere.)
+| Arg | Meaning |
+|---|---|
+| `<node\|dotnet>` | target ecosystem (required). `node` scans a TypeScript/Node project; `dotnet` is **not implemented** and errors. |
+| `--code-root <dir>` | project root to scan (**required**, no default). |
+| `-h`, `--help` | print usage and exit. |
 
-## `inspector-morse.json`
+The output `codebase-dsm.html` is always written into the `--code-root` directory,
+and the page title is that directory's name. (If linked via `npm link`, the
+`inspector-morse` bin runs anywhere.)
 
-Every key is optional — a bare `{}` works. The file only declares scan mechanics
-and cosmetics; the three **levels** are derived from the directory tree (next
-section), not configured.
+Example:
 
-```jsonc
-{
-  "title": "My Project · Dependency Structure Matrix",   // DSM <title>/<h1>
-  "exclude": ["node_modules", "dist", "build"],           // directory names skipped while walking (REPLACES the default, not merged)
-  "includeDts": ["contracts/index.d.ts"],                 // .d.ts files to include (otherwise .d.ts is skipped)
-  "output": {
-    "dir": ".",                                           // default: same dir as this file
-    "dsm": "codebase-dsm.html"                            // the combined Matrix + Graph viewer
-  }
-}
 ```
+inspector-morse node --code-root C:\Projects\battlebuddy
+```
+
+### The `node` ecosystem
+
+`node` walks `--code-root`, skipping the directory names `node_modules`, `dist` and
+`build` (and dot-dirs). All `.ts`/`.tsx` are scanned, **including `.d.ts` type
+declarations** — type contracts always participate.
+
+`dotnet` is reserved for a future .NET analyzer; today it exits with a
+"not implemented" error.
 
 ### Levels are derived from the layout
 
-- **Context** — each immediate child directory of the settings-file dir (the
-  project root), skipping `exclude` names and dot-dirs. A context with no
-  scannable `.ts`/`.tsx` simply never appears.
+- **Context** — each immediate child directory of `--code-root`, skipping the
+  excluded names and dot-dirs. A context with no scannable `.ts`/`.tsx` simply
+  never appears.
 - **Source root** (per context) — the context's `src/` subdir if it exists, else
-  the context dir itself (e.g. a `.d.ts`-only contract package). This is what
-  replaces the old `srcRoots`: only each context's source root is walked, so
-  sibling `tests/`, `__tests__/` and loose config files stay out of the graph.
+  the context dir itself (e.g. a `.d.ts`-only contract package). Only each
+  context's source root is walked, so sibling `tests/`, `__tests__/` and loose
+  config files stay out of the graph.
 - **Namespace** — the first path segment beneath the source root; files sitting
   directly in the source root fall into `(root)`. Names are context-qualified
   for uniqueness, e.g. `A · core`, `A · (root)`.
@@ -76,7 +75,7 @@ palettes (by sorted name), so output is deterministic across runs.
 
 Non-relative imports are first matched against the importing context's tsconfig
 `paths` — each context's own `tsconfig*.json` `compilerOptions.paths` is read
-automatically (no config here). A path-alias that targets another context (e.g.
+automatically. A path-alias that targets another context (e.g.
 `@peek-view` → `../TOW.BattleBuddy/src/peek-view`) resolves to that context's
 files, producing a **cross-context first-party edge**. Type-only cross-context
 imports (e.g. a `@tow/abstractions` contract) don't enter the file graph / cycle
@@ -96,7 +95,7 @@ row axis — the Graph tab is first-party (incl. cross-context) only.
 ## Layout
 
 - `bin/cli.mjs` — CLI entry / dispatch.
-- `src/config.mjs` — load + validate `inspector-morse.json`.
+- `src/args.mjs` — CLI argument parsing + built-in defaults (no config file).
 - `src/codebase-model.mjs` — `buildModel(config)`: scan, resolve, cluster, SCC.
 - `src/dsm.mjs` — assembles the combined viewer HTML; inlines the matrix client,
   the graph client, and Cytoscape + fcose from `node_modules`.
