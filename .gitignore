@@ -142,6 +142,6 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 
-# .NET (dotnet/ port) build output
-dotnet/bin/
-dotnet/obj/
+# .NET build output
+bin/
+obj/

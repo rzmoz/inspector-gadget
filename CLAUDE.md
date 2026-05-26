@@ -5,7 +5,7 @@ Config-free codebase **dependency viewer**. Scans a target project (passed via
 with two interactive tabs — a Dependency Structure **Matrix** and a Cytoscape
 dependency **Graph**. The emitted HTML has no runtime and no build step; it opens
 straight from `file://`. The tool itself is a single **.NET** (net10.0) CLI living
-in `dotnet/`; the two client renderers and Cytoscape + fcose are embedded as
+at the repository root; the two client renderers and Cytoscape + fcose are embedded as
 resources and inlined verbatim into the HTML. The code splits cleanly into an
 **ecosystem-agnostic `Core/`** (the shared model + the viewer) and per-ecosystem
 analyzers under **`Node/`** (TypeScript source) and **`Dotnet/`** (compiled .NET
@@ -13,16 +13,16 @@ assemblies) — folders + names signal which is which; each ecosystem just adds 
 analyzer that produces the shared model.
 
 ## Run
-- Debug: `dotnet run --project dotnet -- <node|dotnet> --code-root <dir> [-h|--help]`
-  (or the built exe `dotnet/bin/Debug/net10.0/inspector-morse.exe`).
+- Debug: `dotnet run -- <node|dotnet> --code-root <dir> [-h|--help]`
+  (or the built exe `bin/Debug/net10.0/inspector-morse.exe`).
 - `node` scans a TS/Node project's source; `dotnet` scans a project's **built**
   assemblies (NDepend-style: assembly → namespace → type, via System.Reflection.Metadata).
   `--code-root` is required (no default); the viewer is written into it and titled by its dir name.
-- No config file — all settings are CLI args + built-in defaults (`dotnet/Cli.cs`).
-- Release: `dotnet publish dotnet -c Release -r <rid>` → single-file, self-contained,
+- No config file — all settings are CLI args + built-in defaults (`Cli.cs`).
+- Release: `dotnet publish -c Release -r <rid>` → single-file, self-contained,
   OS-agnostic exe (`<rid>` = win-x64/linux-x64/osx-arm64/…). Not packed/installed.
 
-## Files (all under `dotnet/`)
+## Files (all in the repo root)
 **`Core/`** is ecosystem-agnostic (works for any codebase model); **`Node/`** and
 **`Dotnet/`** are the tech-stack-specific analyzers. The root holds the generic
 CLI shell.

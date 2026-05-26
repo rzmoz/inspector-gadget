@@ -50,14 +50,14 @@ inspector-morse node --code-root C:\Projects\battlebuddy
 
 ### Build & run
 
-Requires the .NET 10 SDK; the project lives in `dotnet/`.
+Requires the .NET 10 SDK; the project lives at the repository root.
 
 ```
 # local debug
-dotnet run --project dotnet -- node --code-root <dir>
+dotnet run -- node --code-root <dir>
 
 # release: single-file, self-contained, OS-agnostic — pick a runtime identifier
-dotnet publish dotnet -c Release -r win-x64     # or linux-x64, osx-x64, osx-arm64, …
+dotnet publish -c Release -r win-x64     # or linux-x64, osx-x64, osx-arm64, …
 ```
 
 A self-contained publish bundles the .NET runtime plus all assets, so the
@@ -120,7 +120,7 @@ row axis — the Graph tab is first-party (incl. cross-context) only.
 
 ## Layout
 
-All under `dotnet/`. The code is split so it's obvious which parts are generic
+All in the repository root. The code is split so it's obvious which parts are generic
 and which are tech-stack-specific: **`Core/`** is ecosystem-agnostic (works for
 any codebase model), **`Node/`** and **`Dotnet/`** are the per-ecosystem analyzers,
 and the root is the generic CLI shell. Adding another ecosystem means adding one
