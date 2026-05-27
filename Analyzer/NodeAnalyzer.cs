@@ -67,7 +67,7 @@ internal static class NodeAnalyzer
                     fileCtx[r] = ctx;
                     string rest = r.StartsWith(srcRoot + "/", StringComparison.Ordinal) ? r[(srcRoot.Length + 1)..] : r;
                     int slash = rest.IndexOf('/');
-                    fileNs[r] = $"{ctx} · {(slash >= 0 ? rest[..slash] : "(root)")}";
+                    fileNs[r] = ctx + Model.NsSep + (slash >= 0 ? rest[..slash] : "(root)");
                 }
             }
         }
@@ -149,20 +149,20 @@ internal static class NodeAnalyzer
         }
 
         // ---- build edges (file → file import dependencies) ----
-        var edges = new List<(string, string)>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var tpEdges = new List<(string, string)>();
-        var tpSeen = new HashSet<string>(StringComparer.Ordinal);
+        var edges = new List<Edge>();
+        var seen = new HashSet<Edge>();
+        var tpEdges = new List<TpRef>();
+        var tpSeen = new HashSet<TpRef>();
         var tpPkgs = new HashSet<string>(StringComparer.Ordinal);
-        var typeXctxEdges = new List<(string, string)>();
-        var txSeen = new HashSet<string>(StringComparer.Ordinal);
+        var typeXctxEdges = new List<Edge>();
+        var txSeen = new HashSet<Edge>();
 
         void AddInternal(string f, string? tgt)
         {
             if (tgt != null && tgt != f)
             {
-                string key = f + ">" + tgt;
-                if (seen.Add(key)) edges.Add((f, tgt));
+                var e = new Edge(f, tgt);
+                if (seen.Add(e)) edges.Add(e);
             }
         }
         void AddExternal(string f, string spec)
@@ -171,8 +171,8 @@ internal static class NodeAnalyzer
             string? pkg = PkgRoot(spec);
             if (pkg == null) return;
             tpPkgs.Add(pkg);
-            string key = f + ">" + pkg;
-            if (tpSeen.Add(key)) tpEdges.Add((f, pkg));
+            var e = new TpRef(f, pkg);
+            if (tpSeen.Add(e)) tpEdges.Add(e);
         }
 
         foreach (var f in files)
@@ -189,8 +189,8 @@ internal static class NodeAnalyzer
                 if (!typeOnly) AddInternal(f, tgt);
                 else if (fileCtx[f] != fileCtx[tgt] && tgt != f)
                 {
-                    string k = f + ">" + tgt;
-                    if (txSeen.Add(k)) typeXctxEdges.Add((f, tgt));
+                    var e = new Edge(f, tgt);
+                    if (txSeen.Add(e)) typeXctxEdges.Add(e);
                 }
             }
             foreach (Match m in SideRe.Matches(src))

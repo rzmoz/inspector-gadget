@@ -6,12 +6,23 @@ using System.Text.Json.Serialization;
 
 namespace InspectorGadget.Core;
 
+// ── WIRE CONTRACT (read before changing the payload shape) ───────────────────
+// Viewer PRODUCES a JSON payload + node-id strings; the browser clients CONSUME
+// them: assets/dsm.client.js (matrix) and assets/graph.client.js (graph). There
+// is no compile-time link between the two sides — change one, change both.
+//   • node ids:  Wire.CtxId(c)="c:"+c   Wire.NsId(n)="n:"+n   Wire.FileId(i)="f:"+i
+//   • namespace labels are context-qualified as  "{ctx}" + Model.NsSep + "{name}"
+//   • matrix edges arrive as [fromFileIndex, toFileIndex] int pairs (payload.edges)
+//   • graph edge ids are built *client-side* as  "r:"+source+">"+target
+//   • the JSON keys both clients read are the [JsonPropertyName] values on the
+//     *Dto types at the bottom of this file.
+//
 // Ecosystem-agnostic viewer: renders any Model into the self-contained
 // codebase-dsm.html (Matrix + Graph tabs) and prints the directionality report.
 // Computes the dependency-first ("triangular") sibling order per level, builds
-// the context→namespace→file tree + file-indexed edge list (matrix) and the
-// graph payload, then fills the HTML template with the embedded client
-// renderers + Cytoscape/fcose. Knows nothing about TypeScript.
+// the context→namespace→file tree + file-indexed edge list (matrix) and the graph
+// payload, then fills the HTML template with the embedded clients + Cytoscape/
+// fcose. Knows nothing about any one language.
 internal static class Viewer
 {
     public static void Render(Model model, Config config)
@@ -29,15 +40,18 @@ internal static class Viewer
         PrintReport(model, config.OutputDsm, html.Length);
     }
 
-    private static string FileLabel(string f)
+    // ---- display-label helpers ----
+    private static string FileLabel(string f)            // last two path segments
     {
         var parts = f.Split('/');
         return parts.Length <= 2 ? f : string.Join("/", parts[^2..]);
     }
+    private static string FileName(string f) => f.Split('/')[^1];        // last segment only
+    private static string NsLeaf(string ns) => ns.Split(Model.NsSep)[^1]; // drop "{ctx} · " prefix
 
     // ---- dependency-first ("triangular") sibling order for one level ----
     private static int[] TriOrder(List<string> nodes, Func<string, string> nodeOf, Scc<string> scc,
-        Func<string, string> labelFor, Func<string, string> ctxFor, List<(string a, string b)> edges)
+        Func<string, string> labelFor, Func<string, string> ctxFor, List<Edge> edges)
     {
         int N = nodes.Count;
         var pos = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -92,8 +106,13 @@ internal static class Viewer
         var triGlobal = new List<int>();
         foreach (int c in post) triGlobal.AddRange(members[c]);
 
-        // context-major partition (context graph is acyclic) keeps each context
-        // one contiguous dependency-first run with its triangular order intact.
+        return ContextMajorOrder(triGlobal, ctx, adj, N);
+    }
+
+    // Context-major partition: the context graph is acyclic, so keep each context
+    // as one contiguous dependency-first run with its triangular order intact.
+    private static int[] ContextMajorOrder(List<int> triGlobal, string[] ctx, OrderedIntSet[] adj, int N)
+    {
         var ctxKeys = Seq.DistinctInOrder(ctx);
         var ctxAdj = new Dictionary<string, OrderedStringSet>(StringComparer.Ordinal);
         foreach (var c in ctxKeys) ctxAdj[c] = new();
@@ -122,6 +141,8 @@ internal static class Viewer
         var fIndex = new Dictionary<string, int>(StringComparer.Ordinal);
         for (int i = 0; i < files.Count; i++) fIndex[files[i]] = i;
 
+        // resolve each level's triangular order back to names, then bucket the
+        // tree: context → its namespaces → each namespace's files.
         var ctxOrder = ctxOrderIdx.Select(i => model.AllCtx[i]).ToList();
         var nsOrderAll = nsOrderIdx.Select(i => model.AllGroups[i]).ToList();
         var fileOrderAll = fileOrderIdx.Select(i => files[i]).ToList();
@@ -131,32 +152,72 @@ internal static class Viewer
         var filesByNs = nsOrderAll.ToDictionary(ns => ns, _ => new List<string>(), StringComparer.Ordinal);
         foreach (var f in fileOrderAll) filesByNs[model.GroupOf(f)].Add(f);
 
+        var (nodes, roots) = BuildTree(model, ctxOrder, nsByCtx, filesByNs, fIndex);
+        var (edgeIdx, fileComp, cycleComps, reachPairs) = BuildMatrixData(model, fIndex);
+
+        var contexts = model.ContextOrder.Where(n => model.AllCtx.Contains(n))
+            .Select(n => new ContextDto { Name = n, Colour = model.CtxColour(n) }).ToList();
+
+        // third-party block mutates nodes/roots/contexts and yields its edge rows.
+        var (tpCtxId, tpEdgeIdx) = BuildThirdParty(model, nodes, roots, contexts, fIndex);
+
+        return new PayloadDto
+        {
+            Nodes = nodes,
+            Roots = roots,
+            Edges = edgeIdx.Concat(tpEdgeIdx).ToList(),
+            FilePaths = files.Concat(model.TpPackages).ToList(),
+            FileComp = fileComp,
+            CycleComps = cycleComps,
+            ReachPairs = reachPairs,
+            Contexts = contexts,
+            ThirdPartyCtxId = tpCtxId,
+            FileCount = files.Count,
+            EdgeCount = model.Edges.Count,
+            TpCount = model.TpPackages.Count,
+            Graph = BuildGraphData(model, fIndex),
+        };
+    }
+
+    // ---- first-party context→namespace→file tree (matrix + tree payload) ----
+    private static (Dictionary<string, NodeDto> nodes, List<string> roots) BuildTree(
+        Model model, List<string> ctxOrder, Dictionary<string, List<string>> nsByCtx,
+        Dictionary<string, List<string>> filesByNs, Dictionary<string, int> fIndex)
+    {
         var nodes = new Dictionary<string, NodeDto>(StringComparer.Ordinal);
         var roots = new List<string>();
         foreach (var c in ctxOrder)
         {
-            string cid = "c:" + c;
+            string cid = Wire.CtxId(c);
             var ctxNode = new NodeDto { Id = cid, Kind = "context", Label = c, Title = c, Colour = model.CtxColour(c), Ctx = c, Parent = null, Depth = 0 };
             nodes[cid] = ctxNode; roots.Add(cid);
             foreach (var ns in nsByCtx[c])
             {
-                string nid = "n:" + ns;
+                string nid = Wire.NsId(ns);
                 var nsNode = new NodeDto { Id = nid, Kind = "namespace", Label = ns, Title = ns, Colour = model.ColourOf(ns), Ctx = c, Parent = cid, Depth = 1 };
                 nodes[nid] = nsNode; ctxNode.Children.Add(nid);
                 foreach (var f in filesByNs[ns])
                 {
-                    int fi = fIndex[f]; string fid = "f:" + fi;
+                    int fi = fIndex[f]; string fid = Wire.FileId(fi);
                     nodes[fid] = new NodeDto { Id = fid, Kind = "file", Label = FileLabel(f), Title = f, Colour = model.ColourOf(ns), Ctx = c, Parent = nid, Depth = 2, Fi = fi };
                     nsNode.Children.Add(fid);
                 }
             }
         }
+        return (nodes, roots);
+    }
 
-        var edgeIdx = model.Edges.Select(e => new[] { fIndex[e.a], fIndex[e.b] }).ToList();
+    // ---- matrix data: file-indexed edges, SCC comp per file, cycles, reach pairs ----
+    private static (List<int[]> edgeIdx, List<int> fileComp, List<int> cycleComps, List<int[]> reachPairs)
+        BuildMatrixData(Model model, Dictionary<string, int> fIndex)
+    {
+        var files = model.Files;
+        var edgeIdx = model.Edges.Select(e => new[] { fIndex[e.From], fIndex[e.To] }).ToList();
         var fileComp = files.Select(f => model.FileScc.Id[f]).ToList();
         var cycleComps = model.FileScc.Comps
             .Select((c, i) => (i, n: c.Count)).Where(x => x.n > 1).Select(x => x.i).ToList();
 
+        // transitive reachability per file (iterative DFS) → indirect-mode cells.
         var fadj = new List<int>[files.Count];
         for (int i = 0; i < files.Count; i++) fadj[i] = new();
         foreach (var e in edgeIdx) fadj[e[0]].Add(e[1]);
@@ -175,23 +236,29 @@ internal static class Viewer
             }
             foreach (int j in seenOrder) if (j != i) reachPairs.Add(new[] { i, j });
         }
+        return (edgeIdx, fileComp, cycleComps, reachPairs);
+    }
 
-        var contexts = model.ContextOrder.Where(n => model.AllCtx.Contains(n))
-            .Select(n => new ContextDto { Name = n, Colour = model.CtxColour(n) }).ToList();
-
-        // ---- third-party reference nodes (synthetic sink "files") ----
+    // ---- third-party reference nodes (synthetic sink "files") ----
+    // Mutates `nodes`/`roots`/`contexts` in place; returns the tp context id (or
+    // null when there are none) and the third-party edge rows.
+    private static (string? tpCtxId, List<int[]> tpEdgeIdx) BuildThirdParty(
+        Model model, Dictionary<string, NodeDto> nodes, List<string> roots,
+        List<ContextDto> contexts, Dictionary<string, int> fIndex)
+    {
         const string tpCtx = "(third-party)", tpCtxColour = "#e9d5ff", tpNodeColour = "#d8b4fe";
         var packages = model.TpPackages;
+        // tp packages are indexed after the real files (files.Count + i).
         var tpFi = new Dictionary<string, int>(StringComparer.Ordinal);
-        for (int i = 0; i < packages.Count; i++) tpFi[packages[i]] = files.Count + i;
-        string tpCtxId = "c:" + tpCtx;
+        for (int i = 0; i < packages.Count; i++) tpFi[packages[i]] = model.Files.Count + i;
+        string tpCtxId = Wire.CtxId(tpCtx);
         if (packages.Count > 0)
         {
             var tpCtxNode = new NodeDto { Id = tpCtxId, Kind = "context", Label = tpCtx, Title = tpCtx + " — external references", Colour = tpCtxColour, Ctx = tpCtx, Parent = null, Depth = 0, Tp = true };
             nodes[tpCtxId] = tpCtxNode; roots.Add(tpCtxId);
             foreach (var pkg in packages)
             {
-                string nid = "n:" + pkg; int fi = tpFi[pkg]; string fid = "f:" + fi;
+                string nid = Wire.NsId(pkg); int fi = tpFi[pkg]; string fid = Wire.FileId(fi);
                 var nsNode = new NodeDto { Id = nid, Kind = "namespace", Label = pkg, Title = pkg, Colour = tpNodeColour, Ctx = tpCtx, Parent = tpCtxId, Depth = 1, Tp = true };
                 nsNode.Children.Add(fid);
                 nodes[nid] = nsNode; tpCtxNode.Children.Add(nid);
@@ -199,14 +266,19 @@ internal static class Viewer
             }
             contexts.Add(new ContextDto { Name = tpCtx, Colour = tpCtxColour });
         }
-        var tpEdgeIdx = model.TpEdges.Select(e => new[] { fIndex[e.f], tpFi[e.pkg] }).ToList();
+        var tpEdgeIdx = model.TpEdges.Select(e => new[] { fIndex[e.From], tpFi[e.Package] }).ToList();
+        return (packages.Count > 0 ? tpCtxId : null, tpEdgeIdx);
+    }
 
-        // ---- graph-tab data (first-party only) ----
+    // ---- graph-tab data (first-party only; incl. type-only cross-context) ----
+    private static GraphDto BuildGraphData(Model model, Dictionary<string, int> fIndex)
+    {
+        var files = model.Files;
         var gCtxOf = model.AllGroups.ToDictionary(g => g, g => model.ContextOf(model.ByGroup[g][0]), StringComparer.Ordinal);
         var gNodes = new List<GraphNodeDto>();
-        foreach (var c in model.AllCtx) gNodes.Add(new GraphNodeDto { Id = "c:" + c, Label = c, Kind = "context", Colour = model.CtxColour(c) });
-        foreach (var g in model.AllGroups) gNodes.Add(new GraphNodeDto { Id = "n:" + g, Parent = "c:" + gCtxOf[g], Label = g.Split(" · ")[^1], Kind = "namespace", Colour = model.ColourOf(g), Title = g });
-        foreach (var f in files) gNodes.Add(new GraphNodeDto { Id = "f:" + fIndex[f], Parent = "n:" + model.GroupOf(f), Label = f.Split('/')[^1], Kind = "file", Colour = model.ColourOf(model.GroupOf(f)), Title = f });
+        foreach (var c in model.AllCtx) gNodes.Add(new GraphNodeDto { Id = Wire.CtxId(c), Label = c, Kind = "context", Colour = model.CtxColour(c) });
+        foreach (var g in model.AllGroups) gNodes.Add(new GraphNodeDto { Id = Wire.NsId(g), Parent = Wire.CtxId(gCtxOf[g]), Label = NsLeaf(g), Kind = "namespace", Colour = model.ColourOf(g), Title = g });
+        foreach (var f in files) gNodes.Add(new GraphNodeDto { Id = Wire.FileId(fIndex[f]), Parent = Wire.NsId(model.GroupOf(f)), Label = FileName(f), Kind = "file", Colour = model.ColourOf(model.GroupOf(f)), Title = f });
 
         var gFileEdges = new List<GraphEdgeDto>();
         foreach (var (a, b) in model.Edges)
@@ -214,28 +286,26 @@ internal static class Viewer
             string na = model.GroupOf(a), nb = model.GroupOf(b);
             bool nsCyc = na != nb && model.GroupScc.Id[na] == model.GroupScc.Id[nb] && model.GroupScc.Size(na) > 1;
             bool fileCyc = model.FileScc.Id[a] == model.FileScc.Id[b] && model.FileScc.Size(a) > 1;
-            gFileEdges.Add(new GraphEdgeDto { S = "f:" + fIndex[a], T = "f:" + fIndex[b], Ns1 = "n:" + na, Ns2 = "n:" + nb, Ctx1 = "c:" + model.ContextOf(a), Ctx2 = "c:" + model.ContextOf(b), NsCyc = nsCyc, FileCyc = fileCyc });
+            gFileEdges.Add(MakeGraphEdge(model, fIndex, a, b, na, nb, nsCyc, fileCyc));
         }
         foreach (var (a, b) in model.TypeXctxEdges)
-            gFileEdges.Add(new GraphEdgeDto { S = "f:" + fIndex[a], T = "f:" + fIndex[b], Ns1 = "n:" + model.GroupOf(a), Ns2 = "n:" + model.GroupOf(b), Ctx1 = "c:" + model.ContextOf(a), Ctx2 = "c:" + model.ContextOf(b), NsCyc = false, FileCyc = false });
+            gFileEdges.Add(MakeGraphEdge(model, fIndex, a, b, model.GroupOf(a), model.GroupOf(b), false, false));
 
-        return new PayloadDto
-        {
-            Nodes = nodes,
-            Roots = roots,
-            Edges = edgeIdx.Concat(tpEdgeIdx).ToList(),
-            FilePaths = files.Concat(packages).ToList(),
-            FileComp = fileComp,
-            CycleComps = cycleComps,
-            ReachPairs = reachPairs,
-            Contexts = contexts,
-            ThirdPartyCtxId = packages.Count > 0 ? tpCtxId : null,
-            FileCount = files.Count,
-            EdgeCount = model.Edges.Count,
-            TpCount = packages.Count,
-            Graph = new GraphDto { Nodes = gNodes, FileEdges = gFileEdges },
-        };
+        return new GraphDto { Nodes = gNodes, FileEdges = gFileEdges };
     }
+
+    private static GraphEdgeDto MakeGraphEdge(Model model, Dictionary<string, int> fIndex,
+        string a, string b, string na, string nb, bool nsCyc, bool fileCyc) => new()
+    {
+        S = Wire.FileId(fIndex[a]),
+        T = Wire.FileId(fIndex[b]),
+        Ns1 = Wire.NsId(na),
+        Ns2 = Wire.NsId(nb),
+        Ctx1 = Wire.CtxId(model.ContextOf(a)),
+        Ctx2 = Wire.CtxId(model.ContextOf(b)),
+        NsCyc = nsCyc,
+        FileCyc = fileCyc,
+    };
 
     // ---- HTML assembly ----
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -324,6 +394,16 @@ internal static class Viewer
         long kb = (long)Math.Round(htmlLen / 1024.0, MidpointRounding.AwayFromZero);
         Out($"\nwrote: {outPath} ({kb} KB)  — interactive viewer: Matrix + Graph tabs (open in a browser)");
     }
+}
+
+// Node-id construction shared with the JS clients — see the WIRE CONTRACT note
+// at the top of this file. The "c:"/"n:"/"f:" prefixes also appear, by necessity,
+// in assets/dsm.client.js and assets/graph.client.js.
+internal static class Wire
+{
+    public static string CtxId(string ctx) => "c:" + ctx;
+    public static string NsId(string ns) => "n:" + ns;
+    public static string FileId(int fileIndex) => "f:" + fileIndex;
 }
 
 // ---- payload DTOs (property names match the JS object keys the client reads) ----

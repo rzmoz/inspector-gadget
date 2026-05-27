@@ -24,6 +24,11 @@ internal static class DotnetAnalyzer
     // dirs skipped while searching for .csproj (dot-dirs are skipped too).
     public static readonly string[] DefaultExcludes = { "bin", "obj", "node_modules" };
 
+    // (assembly, fully-qualified type name) — a type's cross-assembly identity.
+    private readonly record struct TypeId(string Assembly, string FullName);
+    // where a first-party type lives: which loaded reader + its metadata handle.
+    private readonly record struct TypeLoc(int ReaderIdx, TypeDefinitionHandle Handle);
+
     public static Model Build(Config config)
     {
         string root = config.Root;
@@ -60,8 +65,8 @@ internal static class DotnetAnalyzer
             var files = new List<string>();
             var fileCtx = new Dictionary<string, string>(StringComparer.Ordinal);
             var fileNs = new Dictionary<string, string>(StringComparer.Ordinal);
-            var index = new Dictionary<(string asm, string full), string>(); // (assembly, fullName) → leafId
-            var typeOf = new Dictionary<string, (int idx, TypeDefinitionHandle h)>(StringComparer.Ordinal);
+            var index = new Dictionary<TypeId, string>(); // type identity → leafId
+            var typeOf = new Dictionary<string, TypeLoc>(StringComparer.Ordinal);
             var firstParty = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (var (asm, dll) in firstPartyDlls)
@@ -98,45 +103,47 @@ internal static class DotnetAnalyzer
                     if (typeOf.ContainsKey(leaf)) continue;
                     files.Add(leaf);
                     fileCtx[leaf] = ctx;
-                    fileNs[leaf] = ctx + " · " + nsLabel;
-                    index[(ctx, full)] = leaf;
-                    typeOf[leaf] = (myIdx, th);
+                    fileNs[leaf] = ctx + Model.NsSep + nsLabel;
+                    index[new TypeId(ctx, full)] = leaf;
+                    typeOf[leaf] = new TypeLoc(myIdx, th);
                 }
             }
             files.Sort(StringComparer.Ordinal); // deterministic order
 
             // ---- pass 2: extract type → type edges (structural + IL bodies) ----
-            var edges = new List<(string, string)>();
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            var tpEdges = new List<(string, string)>();
-            var tpSeen = new HashSet<string>(StringComparer.Ordinal);
+            var edges = new List<Edge>();
+            var edgeSeen = new HashSet<Edge>();
+            var tpEdges = new List<TpRef>();
+            var tpSeen = new HashSet<TpRef>();
             var tpPkgs = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (var leaf in files)
             {
-                var (idx, h) = typeOf[leaf];
-                var r = readers[idx]; var pe = pes[idx]; var ctx = ctxNames[idx];
-                var ids = new List<(string, string)>();
-                var idSeen = new HashSet<(string, string)>();
-                try { CollectTypeRefs(r, pe, ctx, h, ids, idSeen); }
+                var (readerIdx, typeHandle) = typeOf[leaf];
+                var reader = readers[readerIdx]; var peReader = pes[readerIdx]; var ctx = ctxNames[readerIdx];
+                var ids = new List<TypeId>();
+                var idSeen = new HashSet<TypeId>();
+                try { CollectTypeRefs(reader, peReader, ctx, typeHandle, ids, idSeen); }
                 catch { /* skip malformed type */ }
 
                 foreach (var id in ids)
                 {
                     if (index.TryGetValue(id, out var tleaf))
                     {
-                        if (tleaf != leaf && seen.Add(leaf + ">" + tleaf)) edges.Add((leaf, tleaf));
+                        var e = new Edge(leaf, tleaf);
+                        if (tleaf != leaf && edgeSeen.Add(e)) edges.Add(e);
                     }
-                    else if (!firstParty.Contains(id.Item1)) // external assembly → third-party
+                    else if (!firstParty.Contains(id.Assembly)) // external assembly → third-party
                     {
-                        tpPkgs.Add(id.Item1);
-                        if (tpSeen.Add(leaf + ">" + id.Item1)) tpEdges.Add((leaf, id.Item1));
+                        tpPkgs.Add(id.Assembly);
+                        var t = new TpRef(leaf, id.Assembly);
+                        if (tpSeen.Add(t)) tpEdges.Add(t);
                     }
                     // else: first-party assembly but type was skipped → no edge
                 }
             }
 
-            return ModelBuilder.Assemble(files, fileCtx, fileNs, edges, tpEdges, tpPkgs, new List<(string, string)>());
+            return ModelBuilder.Assemble(files, fileCtx, fileNs, edges, tpEdges, tpPkgs, new List<Edge>());
         }
         finally
         {
@@ -206,7 +213,7 @@ internal static class DotnetAnalyzer
         return (pns, pfull + "+" + name);
     }
 
-    private static (string asm, string full) ResolveTypeRef(MetadataReader r, string ctx, TypeReferenceHandle h)
+    private static TypeId ResolveTypeRef(MetadataReader r, string ctx, TypeReferenceHandle h)
     {
         var tr = r.GetTypeReference(h);
         string name = r.GetString(tr.Name);
@@ -215,23 +222,23 @@ internal static class DotnetAnalyzer
         {
             string asm = r.GetString(r.GetAssemblyReference((AssemblyReferenceHandle)scope).Name);
             string ns = r.GetString(tr.Namespace);
-            return (asm, ns.Length > 0 ? ns + "." + name : name);
+            return new TypeId(asm, ns.Length > 0 ? ns + "." + name : name);
         }
         if (scope.Kind == HandleKind.TypeReference)
         {
             var (pasm, pfull) = ResolveTypeRef(r, ctx, (TypeReferenceHandle)scope);
-            return (pasm, pfull + "+" + name);
+            return new TypeId(pasm, pfull + "+" + name);
         }
         // ModuleDefinition / ModuleReference / nil → current assembly
         {
             string ns = r.GetString(tr.Namespace);
-            return (ctx, ns.Length > 0 ? ns + "." + name : name);
+            return new TypeId(ctx, ns.Length > 0 ? ns + "." + name : name);
         }
     }
 
     // ---- collect every type a given type depends on ----
     private static void CollectTypeRefs(MetadataReader r, PEReader pe, string ctx,
-        TypeDefinitionHandle th, List<(string, string)> ids, HashSet<(string, string)> seen)
+        TypeDefinitionHandle th, List<TypeId> ids, HashSet<TypeId> seen)
     {
         var td = r.GetTypeDefinition(th);
         void Add(EntityHandle e) { if (!e.IsNil) Resolve(r, ctx, e, ids, seen); }
@@ -277,7 +284,7 @@ internal static class DotnetAnalyzer
     }
 
     private static void AddGenericConstraints(MetadataReader r, string ctx,
-        GenericParameterHandleCollection gps, List<(string, string)> ids, HashSet<(string, string)> seen)
+        GenericParameterHandleCollection gps, List<TypeId> ids, HashSet<TypeId> seen)
     {
         foreach (var gph in gps)
         {
@@ -292,7 +299,7 @@ internal static class DotnetAnalyzer
 
     // run a signature decode through the ref-collecting provider, then resolve
     // every leaf type handle it recorded.
-    private static void DecodeInto(List<(string, string)> ids, HashSet<(string, string)> seen,
+    private static void DecodeInto(List<TypeId> ids, HashSet<TypeId> seen,
         MetadataReader r, string ctx, Action<RefCollector> decode)
     {
         var col = new RefCollector();
@@ -301,7 +308,7 @@ internal static class DotnetAnalyzer
     }
 
     private static void Resolve(MetadataReader r, string ctx, EntityHandle h,
-        List<(string, string)> ids, HashSet<(string, string)> seen)
+        List<TypeId> ids, HashSet<TypeId> seen)
     {
         if (h.IsNil) return;
         switch (h.Kind)
@@ -353,9 +360,9 @@ internal static class DotnetAnalyzer
         }
     }
 
-    private static void AddId(string asm, string full, List<(string, string)> ids, HashSet<(string, string)> seen)
+    private static void AddId(string asm, string full, List<TypeId> ids, HashSet<TypeId> seen)
     {
-        var id = (asm, full);
+        var id = new TypeId(asm, full);
         if (seen.Add(id)) ids.Add(id);
     }
 
@@ -377,7 +384,7 @@ internal static class DotnetAnalyzer
     }
 
     private static void WalkIL(byte[] il, MetadataReader r, string ctx,
-        List<(string, string)> ids, HashSet<(string, string)> seen)
+        List<TypeId> ids, HashSet<TypeId> seen)
     {
         int i = 0, n = il.Length;
         while (i < n)

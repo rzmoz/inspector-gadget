@@ -11,6 +11,13 @@
   const $ = (s, r = document) => r.querySelector(s);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+  // WIRE CONTRACT (produced by Core/Viewer.cs — keep both sides in sync):
+  //   node ids are prefixed  "c:" context · "n:" namespace · "f:" fileIndex
+  //   T.nodes[id] = { id, kind, label, title, colour, ctx, parent, children, depth, fi?, tp? }
+  //   T.edges = [fromFileIndex, toFileIndex] pairs · T.reachPairs = transitive pairs
+  //   T.fileComp[fi] = SCC id · T.cycleComps = SCC ids with a cycle · T.filePaths[fi] = full path
+  // NAMING in this file: lowercase r/c = row/col *indices*; uppercase R/C = node *ids*;
+  //   within a cell, d = downward dep (row→col), u = upward dep (col→row).
   const T = DATA, N = T.nodes;
   const TP = T.thirdPartyCtxId; // the (third-party) context id, or null
   const state = { order: 'tri', mode: 'direct', tp: 'show' };
@@ -23,12 +30,30 @@
   const CC = {}; for (const c of T.contexts) CC[c.name] = c.colour;
   ctxlegend.innerHTML = '<b>bounded contexts:</b>' + T.contexts.map((c) => `<span><i style="background:${c.colour}"></i>${esc(c.name)}</span>`).join('');
 
-  // per-node subtree files + cycle-comp set (computed once)
+  // per-node subtree: the file indices it covers, and which cycle-SCCs they touch.
   const subFiles = {}; const nodeCyc = {};
   const cycComps = new Set(T.cycleComps);
-  function buildSub(id) { const n = N[id]; if (n.kind === 'file') subFiles[id] = [n.fi]; else { let a = []; for (const c of n.children) { buildSub(c); a = a.concat(subFiles[c]); } subFiles[id] = a; } const s = new Set(); for (const fi of subFiles[id]) { const comp = T.fileComp[fi]; if (cycComps.has(comp)) s.add(comp); } nodeCyc[id] = s; }
-  for (const r of T.roots) buildSub(r);
-  const shareCycle = (a, b) => { const A = nodeCyc[a], B = nodeCyc[b]; if (!A.size || !B.size) return false; for (const x of A) if (B.has(x)) return true; return false; };
+  function buildSub(id) {
+    const n = N[id];
+    if (n.kind === 'file') {
+      subFiles[id] = [n.fi];
+    } else {
+      let files = [];
+      for (const child of n.children) { buildSub(child); files = files.concat(subFiles[child]); }
+      subFiles[id] = files;
+    }
+    const cycles = new Set();
+    for (const fi of subFiles[id]) { const comp = T.fileComp[fi]; if (cycComps.has(comp)) cycles.add(comp); }
+    nodeCyc[id] = cycles;
+  }
+  for (const root of T.roots) buildSub(root);
+  // do two nodes' subtrees share a file-cycle SCC? (→ render the cell as a cycle)
+  const shareCycle = (a, b) => {
+    const A = nodeCyc[a], B = nodeCyc[b];
+    if (!A.size || !B.size) return false;
+    for (const comp of A) if (B.has(comp)) return true;
+    return false;
+  };
 
   const isAnc = (a, b) => { let x = N[b].parent; while (x) { if (x === a) return true; x = N[x].parent; } return false; };
   const nsKey = (id) => { const n = N[id]; return n.kind === 'file' ? n.parent : n.kind === 'namespace' ? id : 'C' + id; };
@@ -41,8 +66,15 @@
   // the third-party toggle is off.
   const rootOrder = (includeTp) => { let a = ordered(T.roots); if (TP) { a = a.filter((id) => id !== TP); if (includeTp) a.push(TP); } return a; };
 
-  // visible ancestors of a file (the nodes that currently carry its weight)
-  const visAnc = (fi) => { const fid = 'f:' + fi, ns = N[fid].parent, ctx = N[ns].parent; const out = [ctx]; if (expanded[ctx]) { out.push(ns); if (expanded[ns]) out.push(fid); } return out; };
+  // visible ancestors of a file = the nodes that currently carry its weight:
+  // always its context; its namespace if the context is expanded; the file
+  // itself only if its namespace is expanded too.
+  const visAnc = (fi) => {
+    const fid = 'f:' + fi, ns = N[fid].parent, ctx = N[ns].parent;
+    const out = [ctx];
+    if (expanded[ctx]) { out.push(ns); if (expanded[ns]) out.push(fid); }
+    return out;
+  };
 
   let cur = null; // {vis, cell, indSet}
   const HL = { colCells: [], rowEls: [], colHs: [], rowHs: [] };
@@ -66,24 +98,29 @@
     const visRows = buildVis(state.tp === 'show');
     const nR = visRows.length, nC = visCols.length;
 
-    // aggregate cells from file edges (parent rows sum their descendants)
+    // aggregate cells from file edges: every (visible-ancestor-of-from,
+    // visible-ancestor-of-to) pair gets one tally, so a collapsed parent row
+    // sums all of its descendants' imports. Skip nesting/diagonal pairs.
     const cell = new Map();
-    for (const [a, b] of T.edges) {
-      const ra = visAnc(a), ca = visAnc(b);
-      for (const r of ra) for (const c of ca) {
-        if (r === c || isAnc(r, c) || isAnc(c, r)) continue;
-        const k = r + '>' + c; let o = cell.get(k);
-        if (!o) { o = { w: 0, edges: [] }; cell.set(k, o); }
-        o.w++; o.edges.push(T.filePaths[a] + '  →  ' + T.filePaths[b]);
+    for (const [fromFi, toFi] of T.edges) {
+      for (const rowId of visAnc(fromFi)) for (const colId of visAnc(toFi)) {
+        if (rowId === colId || isAnc(rowId, colId) || isAnc(colId, rowId)) continue;
+        const key = rowId + '>' + colId;
+        let agg = cell.get(key);
+        if (!agg) { agg = { w: 0, edges: [] }; cell.set(key, agg); }
+        agg.w++;
+        agg.edges.push(T.filePaths[fromFi] + '  →  ' + T.filePaths[toFi]);
       }
     }
+    // indirect mode: mark (row,col) pairs reachable transitively but with no
+    // direct cell, so the matrix can shade them differently.
     const indSet = new Set();
     if (state.mode === 'indirect') {
-      for (const [a, b] of T.reachPairs) {
-        const ra = visAnc(a), ca = visAnc(b);
-        for (const r of ra) for (const c of ca) {
-          if (r === c || isAnc(r, c) || isAnc(c, r)) continue;
-          const k = r + '>' + c; if (!cell.has(k)) indSet.add(k);
+      for (const [fromFi, toFi] of T.reachPairs) {
+        for (const rowId of visAnc(fromFi)) for (const colId of visAnc(toFi)) {
+          if (rowId === colId || isAnc(rowId, colId) || isAnc(colId, rowId)) continue;
+          const key = rowId + '>' + colId;
+          if (!cell.has(key)) indSet.add(key);
         }
       }
     }
@@ -159,7 +196,10 @@
   });
   grid.addEventListener('mouseleave', clearHL);
 
-  function rel(r, c) { // returns {R,C,rn,cn,d,u,containment}
+  // relationship between the nodes at row index r and col index c:
+  // R/C = their ids, rn/cn = their node objects, d = row→col cell, u = col→row
+  // cell, containment = one nests the other (so no dependency cell is drawn).
+  function rel(r, c) {
     const R = cur.visRows[r], C = cur.visCols[c];
     if (R === C || isAnc(R, C) || isAnc(C, R)) return { R, C, rn: N[R], cn: N[C], containment: true };
     return { R, C, rn: N[R], cn: N[C], d: cur.cell.get(R + '>' + C), u: cur.cell.get(C + '>' + R) };

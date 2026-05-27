@@ -18,10 +18,10 @@ internal static class ModelBuilder
         List<string> files,
         Dictionary<string, string> fileCtx,
         Dictionary<string, string> fileNs,
-        List<(string a, string b)> edges,
-        List<(string f, string pkg)> tpEdges,
+        List<Edge> edges,
+        List<TpRef> tpEdges,
         IEnumerable<string> tpPkgs,
-        List<(string a, string b)> typeXctxEdges)
+        List<Edge> typeXctxEdges)
     {
         string Ctx(string f) => fileCtx.TryGetValue(f, out var v) ? v : "other";
         string Grp(string f) => fileNs.TryGetValue(f, out var v) ? v : "other";
@@ -81,7 +81,7 @@ internal static class ModelBuilder
     }
 
     private static Dictionary<string, List<string>> BuildClusterAdj(
-        List<string> clusters, List<(string a, string b)> edges, Func<string, string> of)
+        List<string> clusters, List<Edge> edges, Func<string, string> of)
     {
         var sets = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var adj = new Dictionary<string, List<string>>(StringComparer.Ordinal);
