@@ -3,8 +3,8 @@
   "releases": [
     {
       "project": "lib.inspector-gadget/lib.inspector-gadget.csproj",
-      "version": "0.1.0",
-      "prerelease": ""
+      "version": "0.0.1",
+      "prerelease": "alpha.01"
     }
   ],
   "tests": []
