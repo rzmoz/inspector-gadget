@@ -1,8 +1,7 @@
 namespace InspectorGadget;
 
-// Generic CLI parsing — ecosystem-agnostic. Parses the chosen ecosystem command
-// (node|dotnet), the help flag, and the raw --code-root; validation + dispatch
-// to an ecosystem analyzer happens in Program.cs. There is no config file.
+// CLI parsing: ecosystem command (node|dotnet), --help, --code-root.
+// Validation + dispatch live in Program.cs.
 internal sealed record Cli(string? Command, bool Help, string? Root)
 {
     public const string Usage =

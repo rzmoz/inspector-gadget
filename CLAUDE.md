@@ -143,6 +143,10 @@ tech-stack-specific. `assets/` = embedded client resources.
   free.
 - **`.gitattributes` forces LF** on all checkouts so the embedded assets (and the
   emitted HTML) stay byte-stable across platforms.
+- **Comment style is terse, LLM-first.** Comments carry only load-bearing *why* /
+  invariants + the cross-boundary wire contract — never a restatement of what the
+  code already says, and no decorative `// ---- … ----` dividers. Names + structure
+  do the rest. Keep new code in that style.
 
 ## Model conventions
 Everything is derived from the target's layout.

@@ -1,9 +1,7 @@
 namespace InspectorGadget.Core;
 
-// Generic graph/sequence helpers — ecosystem-agnostic.
-
-// Insertion-order-preserving int/string sets. The triangular ordering's
-// tie-breaks depend on insertion order, which .NET HashSet does not promise.
+// insertion-order-preserving sets — triangular-order tie-breaks depend on it
+// (.NET HashSet doesn't promise iteration order).
 internal sealed class OrderedIntSet
 {
     private readonly HashSet<int> _set = new();
@@ -37,8 +35,7 @@ internal sealed class Scc<T> where T : notnull
     public int Size(T n) => Comps[Id[n]].Count;
 }
 
-// Generic Tarjan SCC. Node order and per-node neighbour order are preserved so
-// component indices and the resulting condensation are deterministic.
+// Tarjan SCC; node + neighbour order preserved → deterministic component ids.
 internal static class Scc
 {
     public static Scc<T> Of<T>(IList<T> nodes, Dictionary<T, List<T>> adj) where T : notnull

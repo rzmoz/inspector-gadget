@@ -8,18 +8,13 @@
     <AssemblyName>inspector-gadget</AssemblyName>
     <RootNamespace>InspectorGadget</RootNamespace>
     <Deterministic>true</Deterministic>
-    <!-- ICU is required: the triangular ordering mirrors JS localeCompare via
-         culture-aware comparison, so invariant-globalization (ordinal fallback)
-         must stay OFF. -->
+    <!-- ICU required: triangular order mirrors JS localeCompare; keep this OFF -->
     <InvariantGlobalization>false</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
-  <!-- NuGet packaging: `dotnet pack` produces a cross-platform .NET tool package
-       (framework-dependent), package id `lib.inspector-gadget`, installed via
-       `dotnet tool install`/`update`. The typed command stays `inspector-gadget`
-       (ToolCommandName). Independent of the RID-based self-contained single-file
-       publish below — both distribution modes coexist. -->
+  <!-- NuGet tool: `dotnet pack` → portable package lib.inspector-gadget, command
+       inspector-gadget (ToolCommandName). Coexists with the RID exe publish below. -->
   <PropertyGroup>
     <PackageId>lib.inspector-gadget</PackageId>
     <PackAsTool>true</PackAsTool>
@@ -38,13 +33,11 @@
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
-  <!-- Self-contained single-file exe publish. The RID is supplied on the CLI
-       (e.g. `dotnet publish -c Release -r win-x64`; supported: win-x64, win-arm64,
-       linux-x64, linux-arm64, osx-x64, osx-arm64). <RuntimeIdentifiers> is
-       deliberately NOT declared — that keeps `dotnet pack` a single portable,
-       OS-agnostic .NET tool (declaring it makes the SDK also emit per-RID
-       self-contained tool packages). The properties below apply only when a RID
-       is actually passed, so a plain `dotnet build`/`dotnet run` needs none. -->
+  <!-- Self-contained single-file exe: pass the RID on the CLI (`dotnet publish -r
+       win-x64` etc.; also win-arm64, linux-x64, linux-arm64, osx-x64, osx-arm64).
+       Do NOT declare <RuntimeIdentifiers> — it would make `dotnet pack` also emit
+       per-RID tool packages instead of one portable tool. Props below apply only
+       when a RID is passed. -->
   <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
@@ -53,9 +46,7 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
 
-  <!-- Inlined verbatim into the emitted codebase-dsm.html (the matrix + graph
-       renderers, Cytoscape + fcose, and the CSS/HTML template). Embedding them is
-       what makes the exe self-contained with no node_modules at runtime. -->
+  <!-- inlined verbatim into the emitted codebase-dsm.html → self-contained, no runtime assets -->
   <ItemGroup>
     <None Remove="assets\**" />
     <EmbeddedResource Include="assets\dsm.client.js"><LogicalName>dsm.client.js</LogicalName></EmbeddedResource>

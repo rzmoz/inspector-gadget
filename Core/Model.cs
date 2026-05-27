@@ -1,21 +1,15 @@
 namespace InspectorGadget.Core;
 
-// A dependency between two leaf nodes (files or types), identified by their string
-// ids. Value equality (ordinal) lets a HashSet<Edge> dedup directly — replacing
-// the old "from>to" string keys.
+// a dependency between two leaf nodes (file/type ids); value equality dedups
 internal readonly record struct Edge(string From, string To);
-
-// A reference from a first-party leaf to a third-party package / external assembly.
+// a leaf's reference to a third-party package / external assembly
 internal readonly record struct TpRef(string From, string Package);
 
-// The ecosystem-agnostic dependency model — the single shared definition of "the
-// codebase" that every analyzer (Node + .NET) produces and that the Viewer
-// renders. Nothing here knows about any one language: it is just contexts,
-// namespaces, files, import edges, per-level SCCs, and third-party references.
+// the shared, language-agnostic dependency model: contexts, namespaces, files,
+// edges, per-level SCCs, third-party refs. Analyzers produce it; Viewer renders it.
 internal sealed class Model
 {
-    // Namespace labels are context-qualified as "{context}{NsSep}{name}" by every
-    // analyzer and split back on NsSep by the viewer — one definition, shared.
+    // namespace labels are "{ctx}{NsSep}{name}" (analyzers build, viewer splits on NsSep)
     public const string NsSep = " · ";
 
     public required List<string> Files;

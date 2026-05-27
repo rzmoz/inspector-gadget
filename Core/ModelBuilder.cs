@@ -1,11 +1,7 @@
 namespace InspectorGadget.Core;
 
-// Ecosystem-agnostic finalize step. An analyzer's only job is to produce the raw
-// leaf nodes (files/types), their context+namespace tags, the dependency edges,
-// and the third-party references; this turns those into a complete Model —
-// deterministic palette colours, per-level Tarjan SCCs, cluster lists, and the
-// namespace→files map. Both the Node and Dotnet analyzers call this, so adding a
-// new ecosystem is just "write a producer".
+// Finalize step: turns an analyzer's raw leaves/tags/edges/third-party refs into a
+// complete Model — palette colours, per-level Tarjan SCCs, cluster lists, ns→files.
 internal static class ModelBuilder
 {
     private static readonly string[] CtxPalette =
@@ -26,7 +22,7 @@ internal static class ModelBuilder
         string Ctx(string f) => fileCtx.TryGetValue(f, out var v) ? v : "other";
         string Grp(string f) => fileNs.TryGetValue(f, out var v) ? v : "other";
 
-        // contexts + namespaces (colours from deterministic palettes, sorted name)
+        // palette colour by sorted name → deterministic
         var usedCtx = files.Select(Ctx).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
         var usedNs = files.Select(Grp).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
         var ctxColourMap = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -34,23 +30,19 @@ internal static class ModelBuilder
         var nsColourMap = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int i = 0; i < usedNs.Count; i++) nsColourMap[usedNs[i]] = NsPalette[i % NsPalette.Length];
 
-        // file-level SCCs
         var fAdj = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var f in files) fAdj[f] = new();
         foreach (var (a, b) in edges) fAdj[a].Add(b);
         var fileScc = Scc.Of(files, fAdj);
 
-        // namespace-level SCCs
         var allGroups = Seq.DistinctInOrder(files.Select(Grp));
         var gAdj = BuildClusterAdj(allGroups, edges, Grp);
         var groupScc = Scc.Of(allGroups, gAdj);
 
-        // context-level SCCs
         var allCtx = Seq.DistinctInOrder(files.Select(Ctx));
         var cAdj = BuildClusterAdj(allCtx, edges, Ctx);
         var ctxScc = Scc.Of(allCtx, cAdj);
 
-        // namespace → its files
         var byGroup = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var f in files)
         {

@@ -3,16 +3,9 @@ using InspectorGadget;
 using InspectorGadget.Core;
 using InspectorGadget.Analyzer;
 
-// inspector-gadget CLI entry + ecosystem dispatch. Inspects a codebase and writes
-// a self-contained codebase-dsm.html (Matrix + Graph tabs) into the target root.
-//
-//   inspector-gadget <node|dotnet> --code-root <dir> [-h|--help]
-//
-// Core/ is ecosystem-agnostic (Model + Viewer); each ecosystem analyzer in
-// Analyzer/ (Node + .NET) plugs in by producing a Core.Model.
-// No config file: every setting comes from CLI args + built-in defaults.
+// CLI entry + ecosystem dispatch: validate args, run the chosen analyzer, render.
 
-// Glyphs in the report (✓ • —) need a UTF-8 console; harmless if it can't be set.
+// report glyphs need UTF-8; ignore if it can't be set (redirected console)
 try { Console.OutputEncoding = new UTF8Encoding(false); } catch { /* redirected */ }
 
 static void Err(string s) => Console.Error.Write(s + "\n");
@@ -30,14 +23,11 @@ if (cli.Root is null) { Err($"error: --code-root <dir> is required\n\n{Cli.Usage
 string root = cli.Root;
 string command = cli.Command;
 int code = 0;
-// The analysis recurses (Tarjan SCC, reachability DFS); run on a large-stack
-// worker so deep dependency chains can't overflow on any platform.
+// large-stack worker: the Tarjan/reachability recursion can overflow the default stack.
 var worker = new Thread(() =>
 {
     try
     {
-        // each ecosystem analyzer produces the shared Core.Model; the generic
-        // renderer turns it into the viewer.
         Config config; Model model;
         if (command == "node")
         {

@@ -9,19 +9,14 @@ using InspectorGadget.Core;
 
 namespace InspectorGadget.Analyzer;
 
-// .NET ecosystem analyzer — reads the target's COMPILED assemblies (BCL-only,
-// via System.Reflection.Metadata) and produces the ecosystem-agnostic
-// Core.Model that Core.Viewer renders. NDepend-style mapping:
-//   context   = assembly (one per first-party project output)
-//   namespace = C# namespace, context-qualified ("{assembly} · {namespace}")
-//   leaf node = a type (class/struct/interface/enum/record/delegate)
-//   edge      = type → type dependency (structural + method-body IL)
-// First-party assemblies are derived from the .csproj layout + bin output; every
-// referenced non-first-party assembly (incl. System.*/Microsoft.*) is a
-// third-party reference. The target must be built first.
+// .NET analyzer: reads the target's COMPILED assemblies via
+// System.Reflection.Metadata (BCL-only) → Core.Model. NDepend-style: context =
+// assembly, namespace = C# namespace, leaf = type, edge = type→type (structural +
+// method-body IL). First-party from .csproj+bin; every other referenced assembly
+// (incl. System.*/Microsoft.*) is third-party. Build the target first.
 internal static class DotnetAnalyzer
 {
-    // dirs skipped while searching for .csproj (dot-dirs are skipped too).
+    // dirs skipped when searching for .csproj (dot-dirs too)
     public static readonly string[] DefaultExcludes = { "bin", "obj", "node_modules" };
 
     // (assembly, fully-qualified type name) — a type's cross-assembly identity.
@@ -34,7 +29,7 @@ internal static class DotnetAnalyzer
         string root = config.Root;
         var exclude = new HashSet<string>(config.Exclude, StringComparer.Ordinal);
 
-        // ---- discover first-party assemblies from the .csproj layout + bin output ----
+        // discover first-party assemblies from .csproj layout + bin output
         var csprojs = new List<string>();
         FindCsproj(root, exclude, csprojs);
         csprojs.Sort(StringComparer.Ordinal);
@@ -61,7 +56,7 @@ internal static class DotnetAnalyzer
         var ctxNames = new List<string>();
         try
         {
-            // ---- pass 1: enumerate types → leaf nodes + global resolution index ----
+            // pass 1: enumerate types → leaf nodes + resolution index
             var files = new List<string>();
             var fileCtx = new Dictionary<string, string>(StringComparer.Ordinal);
             var fileNs = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -110,7 +105,7 @@ internal static class DotnetAnalyzer
             }
             files.Sort(StringComparer.Ordinal); // deterministic order
 
-            // ---- pass 2: extract type → type edges (structural + IL bodies) ----
+            // pass 2: type→type edges (structural + IL bodies)
             var edges = new List<Edge>();
             var edgeSeen = new HashSet<Edge>();
             var tpEdges = new List<TpRef>();
@@ -152,7 +147,7 @@ internal static class DotnetAnalyzer
         }
     }
 
-    // ---- discovery helpers ----
+    // discovery helpers
     private static void FindCsproj(string dir, HashSet<string> exclude, List<string> outp)
     {
         string[] entries;
@@ -198,7 +193,7 @@ internal static class DotnetAnalyzer
             .FirstOrDefault();
     }
 
-    // ---- type identity ----
+    // type identity
     private static (string ns, string full) TypeName(MetadataReader r, TypeDefinitionHandle h)
     {
         var td = r.GetTypeDefinition(h);
@@ -236,7 +231,7 @@ internal static class DotnetAnalyzer
         }
     }
 
-    // ---- collect every type a given type depends on ----
+    // collect every type a given type depends on
     private static void CollectTypeRefs(MetadataReader r, PEReader pe, string ctx,
         TypeDefinitionHandle th, List<TypeId> ids, HashSet<TypeId> seen)
     {
@@ -297,8 +292,7 @@ internal static class DotnetAnalyzer
         }
     }
 
-    // run a signature decode through the ref-collecting provider, then resolve
-    // every leaf type handle it recorded.
+    // decode a signature through the collector, then resolve each handle it recorded
     private static void DecodeInto(List<TypeId> ids, HashSet<TypeId> seen,
         MetadataReader r, string ctx, Action<RefCollector> decode)
     {
@@ -366,7 +360,7 @@ internal static class DotnetAnalyzer
         if (seen.Add(id)) ids.Add(id);
     }
 
-    // ---- IL body walk: collect referenced types from token-bearing opcodes ----
+    // IL body walk: referenced types from token-bearing opcodes
     private static readonly Dictionary<short, OperandType> OpTable = BuildOpTable();
 
     private static Dictionary<short, OperandType> BuildOpTable()
@@ -436,8 +430,7 @@ internal static class DotnetAnalyzer
         }
     }
 
-    // ISignatureTypeProvider that records every leaf type handle a signature
-    // references (TType is an unused dummy); composite forms just pass through.
+    // ISignatureTypeProvider that just records leaf type handles (TType unused)
     private sealed class RefCollector : ISignatureTypeProvider<int, object?>
     {
         public readonly List<EntityHandle> Handles = new();

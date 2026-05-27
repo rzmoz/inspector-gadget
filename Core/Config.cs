@@ -1,8 +1,7 @@
 namespace InspectorGadget.Core;
 
-// Ecosystem-agnostic run config. Every ecosystem produces one of these; only the
-// `Exclude` list is ecosystem-supplied (see Node/NodeAnalyzer.DefaultExcludes).
-// Title = the root dir name, output = <root>/codebase-dsm.html — both generic.
+// Run config. Only Exclude is analyzer-supplied; Title = root dir name,
+// OutputDsm = <root>/codebase-dsm.html.
 internal sealed record Config(string Root, string[] Exclude, string Title, string OutputDsm)
 {
     public static Config For(string root, string[] exclude)

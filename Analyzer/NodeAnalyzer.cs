@@ -5,18 +5,12 @@ using InspectorGadget.Core;
 
 namespace InspectorGadget.Analyzer;
 
-// Node / TypeScript ecosystem analyzer — the only TypeScript-aware code in the
-// tool. Walks every .ts/.tsx under the derived source roots (incl. .d.ts),
-// resolves the project's own relative + tsconfig-path imports into a file
-// dependency graph, clusters files into namespaces inside contexts, runs Tarjan
-// SCC at file / namespace / context level, and collects unresolved non-relative
-// imports as third-party references. Produces the ecosystem-agnostic Core.Model
-// that Core.Viewer renders. The sibling DotnetAnalyzer does the same for compiled
-// .NET assemblies, producing the same Model.
+// Node/TypeScript analyzer: walk .ts/.tsx (incl. .d.ts), resolve relative +
+// tsconfig-path imports → file edges, collect non-relative imports as third-party,
+// produce Core.Model. (Sibling DotnetAnalyzer does the same for compiled .NET.)
 internal static class NodeAnalyzer
 {
-    // node-ecosystem default: directory names skipped while walking. .d.ts type
-    // declarations are ALWAYS scanned.
+    // dirs skipped while walking; .d.ts are always scanned
     public static readonly string[] DefaultExcludes = { "node_modules", "dist", "build" };
 
     private static readonly Regex FromRe = new(@"\b(?:import|export)\b([^'"";]*?)\bfrom\s*['""]([^'""]+)['""]");
@@ -32,7 +26,7 @@ internal static class NodeAnalyzer
         string root = config.Root;
         var exclude = new HashSet<string>(config.Exclude, StringComparer.Ordinal);
 
-        // ---- discover bounded contexts + their source roots from the tree ----
+        // discover contexts + source roots from the tree
         var contextDirs = SafeDirNames(root)
             .Where(n => !n.StartsWith('.') && !exclude.Contains(n))
             .OrderBy(n => n, StringComparer.Ordinal)
@@ -42,7 +36,7 @@ internal static class NodeAnalyzer
             c => Directory.Exists(Path.Combine(root, c, "src")) ? c + "/src" : c,
             StringComparer.Ordinal);
 
-        // ---- collect source files, tagging each with its context + namespace ----
+        // collect source files, tag each with context + namespace
         var files = new List<string>();
         var fileCtx = new Dictionary<string, string>(StringComparer.Ordinal);
         var fileNs = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -80,7 +74,7 @@ internal static class NodeAnalyzer
         files.Sort(StringComparer.Ordinal); // deterministic order
         var fileSet = new HashSet<string>(files, StringComparer.Ordinal);
 
-        // ---- cross-context path aliases, auto-read from each context's tsconfig ----
+        // cross-context path aliases from each context's tsconfig
         var aliasOf = new Dictionary<string, List<Alias>>(StringComparer.Ordinal);
         foreach (var c in contextDirs)
         {
@@ -105,7 +99,7 @@ internal static class NodeAnalyzer
             if (list.Count > 0) aliasOf[c] = list;
         }
 
-        // ---- resolve an import specifier to a scanned file (null otherwise) ----
+        // resolve an import specifier to a scanned file (else null)
         string? ResolveFile(string @base)
         {
             string noJs = @base.EndsWith(".js", StringComparison.Ordinal) ? @base[..^3] : @base;
@@ -148,7 +142,7 @@ internal static class NodeAnalyzer
             return spec.StartsWith('@') && parts.Length > 1 ? parts[0] + "/" + parts[1] : parts[0];
         }
 
-        // ---- build edges (file → file import dependencies) ----
+        // build file→file import edges
         var edges = new List<Edge>();
         var seen = new HashSet<Edge>();
         var tpEdges = new List<TpRef>();
@@ -216,7 +210,7 @@ internal static class NodeAnalyzer
 
     private static string ToNative(string posix) => posix.Replace('/', Path.DirectorySeparatorChar);
 
-    // Node readFileSync(p,'utf8') does not strip a BOM; decode raw bytes so we match.
+    // match Node readFileSync(utf8): no BOM strip
     private static string ReadText(string path) => Encoding.UTF8.GetString(File.ReadAllBytes(path));
 
     private static IEnumerable<string> SafeDirNames(string dir)
@@ -231,8 +225,7 @@ internal static class NodeAnalyzer
         catch { return Array.Empty<string>(); }
     }
 
-    // tsconfig is JSONC: comments + trailing commas. System.Text.Json handles both
-    // natively. Returns (baseUrl, [key → first target]) or null when paths absent.
+    // tsconfig is JSONC (comments + trailing commas); null when paths absent
     private static (string? BaseUrl, List<(string Key, string First)> Paths)? ReadTsconfig(string file)
     {
         try

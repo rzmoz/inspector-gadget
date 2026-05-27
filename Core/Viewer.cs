@@ -6,23 +6,11 @@ using System.Text.Json.Serialization;
 
 namespace InspectorGadget.Core;
 
-// ── WIRE CONTRACT (read before changing the payload shape) ───────────────────
-// Viewer PRODUCES a JSON payload + node-id strings; the browser clients CONSUME
-// them: assets/dsm.client.js (matrix) and assets/graph.client.js (graph). There
-// is no compile-time link between the two sides — change one, change both.
-//   • node ids:  Wire.CtxId(c)="c:"+c   Wire.NsId(n)="n:"+n   Wire.FileId(i)="f:"+i
-//   • namespace labels are context-qualified as  "{ctx}" + Model.NsSep + "{name}"
-//   • matrix edges arrive as [fromFileIndex, toFileIndex] int pairs (payload.edges)
-//   • graph edge ids are built *client-side* as  "r:"+source+">"+target
-//   • the JSON keys both clients read are the [JsonPropertyName] values on the
-//     *Dto types at the bottom of this file.
-//
-// Ecosystem-agnostic viewer: renders any Model into the self-contained
-// codebase-dsm.html (Matrix + Graph tabs) and prints the directionality report.
-// Computes the dependency-first ("triangular") sibling order per level, builds
-// the context→namespace→file tree + file-indexed edge list (matrix) and the graph
-// payload, then fills the HTML template with the embedded clients + Cytoscape/
-// fcose. Knows nothing about any one language.
+// Renders any Model → the self-contained codebase-dsm.html (Matrix + Graph) + report.
+// WIRE CONTRACT with assets/dsm.client.js + graph.client.js (no compile-time link —
+// change both sides together): node ids Wire.CtxId/NsId/FileId → "c:"/"n:"/"f:";
+// ns labels "{ctx}{NsSep}{name}"; payload.edges = [fromFileIdx,toFileIdx]; clients
+// build graph edge ids "r:"+s+">"+t; JSON keys = [JsonPropertyName] on the *Dto below.
 internal static class Viewer
 {
     public static void Render(Model model, Config config)
@@ -40,7 +28,6 @@ internal static class Viewer
         PrintReport(model, config.OutputDsm, html.Length);
     }
 
-    // ---- display-label helpers ----
     private static string FileLabel(string f)            // last two path segments
     {
         var parts = f.Split('/');
@@ -49,7 +36,7 @@ internal static class Viewer
     private static string FileName(string f) => f.Split('/')[^1];        // last segment only
     private static string NsLeaf(string ns) => ns.Split(Model.NsSep)[^1]; // drop "{ctx} · " prefix
 
-    // ---- dependency-first ("triangular") sibling order for one level ----
+    // dependency-first ("triangular") sibling order for one level
     private static int[] TriOrder(List<string> nodes, Func<string, string> nodeOf, Scc<string> scc,
         Func<string, string> labelFor, Func<string, string> ctxFor, List<Edge> edges)
     {
@@ -109,8 +96,8 @@ internal static class Viewer
         return ContextMajorOrder(triGlobal, ctx, adj, N);
     }
 
-    // Context-major partition: the context graph is acyclic, so keep each context
-    // as one contiguous dependency-first run with its triangular order intact.
+    // context-major partition: each context stays one contiguous dep-first run
+    // (the context graph is acyclic).
     private static int[] ContextMajorOrder(List<int> triGlobal, string[] ctx, OrderedIntSet[] adj, int N)
     {
         var ctxKeys = Seq.DistinctInOrder(ctx);
@@ -134,15 +121,12 @@ internal static class Viewer
         return order.ToArray();
     }
 
-    // ---- assemble the single payload object consumed by both client renderers ----
     private static PayloadDto BuildPayload(Model model, int[] ctxOrderIdx, int[] nsOrderIdx, int[] fileOrderIdx)
     {
         var files = model.Files;
         var fIndex = new Dictionary<string, int>(StringComparer.Ordinal);
         for (int i = 0; i < files.Count; i++) fIndex[files[i]] = i;
 
-        // resolve each level's triangular order back to names, then bucket the
-        // tree: context → its namespaces → each namespace's files.
         var ctxOrder = ctxOrderIdx.Select(i => model.AllCtx[i]).ToList();
         var nsOrderAll = nsOrderIdx.Select(i => model.AllGroups[i]).ToList();
         var fileOrderAll = fileOrderIdx.Select(i => files[i]).ToList();
@@ -179,7 +163,7 @@ internal static class Viewer
         };
     }
 
-    // ---- first-party context→namespace→file tree (matrix + tree payload) ----
+    // first-party context→namespace→file tree
     private static (Dictionary<string, NodeDto> nodes, List<string> roots) BuildTree(
         Model model, List<string> ctxOrder, Dictionary<string, List<string>> nsByCtx,
         Dictionary<string, List<string>> filesByNs, Dictionary<string, int> fIndex)
@@ -207,7 +191,7 @@ internal static class Viewer
         return (nodes, roots);
     }
 
-    // ---- matrix data: file-indexed edges, SCC comp per file, cycles, reach pairs ----
+    // matrix data: file-indexed edges, per-file SCC comp, cycles, reachability pairs
     private static (List<int[]> edgeIdx, List<int> fileComp, List<int> cycleComps, List<int[]> reachPairs)
         BuildMatrixData(Model model, Dictionary<string, int> fIndex)
     {
@@ -239,9 +223,8 @@ internal static class Viewer
         return (edgeIdx, fileComp, cycleComps, reachPairs);
     }
 
-    // ---- third-party reference nodes (synthetic sink "files") ----
-    // Mutates `nodes`/`roots`/`contexts` in place; returns the tp context id (or
-    // null when there are none) and the third-party edge rows.
+    // third-party refs as synthetic sink "files"; mutates nodes/roots/contexts,
+    // returns the tp context id (null if none) + tp edge rows.
     private static (string? tpCtxId, List<int[]> tpEdgeIdx) BuildThirdParty(
         Model model, Dictionary<string, NodeDto> nodes, List<string> roots,
         List<ContextDto> contexts, Dictionary<string, int> fIndex)
@@ -270,7 +253,7 @@ internal static class Viewer
         return (packages.Count > 0 ? tpCtxId : null, tpEdgeIdx);
     }
 
-    // ---- graph-tab data (first-party only; incl. type-only cross-context) ----
+    // graph-tab data (first-party only; incl. type-only cross-context edges)
     private static GraphDto BuildGraphData(Model model, Dictionary<string, int> fIndex)
     {
         var files = model.Files;
@@ -307,7 +290,6 @@ internal static class Viewer
         FileCyc = fileCyc,
     };
 
-    // ---- HTML assembly ----
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -341,8 +323,7 @@ internal static class Viewer
         return Fill(template, vals);
     }
 
-    // Single-pass placeholder substitution so inserted values (which contain
-    // their own `${...}` template literals) are never re-scanned.
+    // single-pass: inserted values contain their own `${...}`, so never re-scan them
     private static string Fill(string tpl, Dictionary<string, string> vals)
     {
         var sb = new StringBuilder(tpl.Length + 1_000_000);
@@ -371,7 +352,6 @@ internal static class Viewer
         return Encoding.UTF8.GetString(ms.ToArray());
     }
 
-    // ---- console: directionality report ----
     private static void PrintReport(Model model, string outPath, int htmlLen)
     {
         void Out(string s) => Console.Out.Write(s + "\n");
@@ -396,9 +376,7 @@ internal static class Viewer
     }
 }
 
-// Node-id construction shared with the JS clients — see the WIRE CONTRACT note
-// at the top of this file. The "c:"/"n:"/"f:" prefixes also appear, by necessity,
-// in assets/dsm.client.js and assets/graph.client.js.
+// node-id construction shared with the JS clients (see WIRE CONTRACT at top)
 internal static class Wire
 {
     public static string CtxId(string ctx) => "c:" + ctx;
@@ -406,7 +384,7 @@ internal static class Wire
     public static string FileId(int fileIndex) => "f:" + fileIndex;
 }
 
-// ---- payload DTOs (property names match the JS object keys the client reads) ----
+// payload DTOs — [JsonPropertyName] values are the JS object keys clients read
 internal sealed class NodeDto
 {
     [JsonPropertyName("id")] public required string Id { get; set; }

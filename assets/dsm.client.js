@@ -1,23 +1,14 @@
-// Browser renderer for the hierarchical Dependency Structure Matrix. Plain DOM,
-// no framework. Inlined verbatim into codebase-dsm.html by Core/Viewer.cs; reads the
-// global `DATA` blob: a context → namespace → file tree, the file-indexed import
-// edges, file-level cycle (SCC) + reachability info, and the context colour key.
-//
-// One matrix covers all three levels via expand/collapse (NDepend-style nested
-// DSM): every visible tree node is a square row+column; a parent's cell is the
-// aggregate of its descendants' file imports; ancestor/descendant + diagonal
-// cells render as "nesting" so the nested diagonal blocks are visible.
+// Matrix renderer (vanilla DOM), inlined into codebase-dsm.html by Core/Viewer.cs.
+// Nested NDepend DSM: every visible tree node is a row+column; a parent cell
+// aggregates its descendants' imports; ancestor/descendant + diagonal = "nesting".
 (function () {
   const $ = (s, r = document) => r.querySelector(s);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  // WIRE CONTRACT (produced by Core/Viewer.cs — keep both sides in sync):
-  //   node ids are prefixed  "c:" context · "n:" namespace · "f:" fileIndex
-  //   T.nodes[id] = { id, kind, label, title, colour, ctx, parent, children, depth, fi?, tp? }
-  //   T.edges = [fromFileIndex, toFileIndex] pairs · T.reachPairs = transitive pairs
-  //   T.fileComp[fi] = SCC id · T.cycleComps = SCC ids with a cycle · T.filePaths[fi] = full path
-  // NAMING in this file: lowercase r/c = row/col *indices*; uppercase R/C = node *ids*;
-  //   within a cell, d = downward dep (row→col), u = upward dep (col→row).
+  // WIRE (from Core/Viewer.cs — keep both sides in sync): node ids "c:"/"n:"/"f:";
+  // T.nodes[id]={id,kind,label,title,colour,ctx,parent,children,depth,fi?,tp?};
+  // T.edges=[fromIdx,toIdx]; T.reachPairs; T.fileComp[fi]=SCC id; T.cycleComps; T.filePaths.
+  // Naming: r/c = row/col indices; R/C = node ids; d/u = down/up dep in a cell.
   const T = DATA, N = T.nodes;
   const TP = T.thirdPartyCtxId; // the (third-party) context id, or null
   const state = { order: 'tri', mode: 'direct', tp: 'show' };
@@ -61,14 +52,11 @@
   // children / roots in the active sibling order
   const ordered = (arr) => state.order === 'alpha' ? arr.slice().sort((p, q) => N[p].label.localeCompare(N[q].label)) : arr;
   const kids = (id) => ordered(N[id].children);
-  // root contexts in the active order, with (third-party) always pinned last
-  // (it's a pure sink, so it would otherwise float to the top), and dropped when
-  // the third-party toggle is off.
+  // root contexts in active order; (third-party) pinned last (pure sink), droppable
   const rootOrder = (includeTp) => { let a = ordered(T.roots); if (TP) { a = a.filter((id) => id !== TP); if (includeTp) a.push(TP); } return a; };
 
-  // visible ancestors of a file = the nodes that currently carry its weight:
-  // always its context; its namespace if the context is expanded; the file
-  // itself only if its namespace is expanded too.
+  // visible ancestors carrying a file's weight: context always; namespace if ctx
+  // expanded; the file itself only if its namespace is expanded too.
   const visAnc = (fi) => {
     const fid = 'f:' + fi, ns = N[fid].parent, ctx = N[ns].parent;
     const out = [ctx];
@@ -85,9 +73,7 @@
   }
 
   function render() {
-    // Columns are first-party only — third-party is NEVER a column (NDepend
-    // style); it only ever appears as rows at the bottom (when toggled on).
-    // visible nodes = pre-order over the expanded tree
+    // columns are first-party only; third-party appears only as rows (NDepend style)
     const buildVis = (includeTp) => {
       const out = [];
       const recf = (id) => { out.push(id); if (N[id].kind !== 'file' && expanded[id]) for (const c of kids(id)) recf(c); };
@@ -98,9 +84,8 @@
     const visRows = buildVis(state.tp === 'show');
     const nR = visRows.length, nC = visCols.length;
 
-    // aggregate cells from file edges: every (visible-ancestor-of-from,
-    // visible-ancestor-of-to) pair gets one tally, so a collapsed parent row
-    // sums all of its descendants' imports. Skip nesting/diagonal pairs.
+    // aggregate cells: each (visAnc-of-from, visAnc-of-to) pair tallies once, so a
+    // collapsed parent sums its descendants' imports. Skip nesting/diagonal.
     const cell = new Map();
     for (const [fromFi, toFi] of T.edges) {
       for (const rowId of visAnc(fromFi)) for (const colId of visAnc(toFi)) {
@@ -112,8 +97,7 @@
         agg.edges.push(T.filePaths[fromFi] + '  →  ' + T.filePaths[toFi]);
       }
     }
-    // indirect mode: mark (row,col) pairs reachable transitively but with no
-    // direct cell, so the matrix can shade them differently.
+    // indirect mode: pairs reachable transitively with no direct cell (shaded differently)
     const indSet = new Set();
     if (state.mode === 'indirect') {
       for (const [fromFi, toFi] of T.reachPairs) {
@@ -196,9 +180,7 @@
   });
   grid.addEventListener('mouseleave', clearHL);
 
-  // relationship between the nodes at row index r and col index c:
-  // R/C = their ids, rn/cn = their node objects, d = row→col cell, u = col→row
-  // cell, containment = one nests the other (so no dependency cell is drawn).
+  // rel at row r / col c: R/C ids, rn/cn nodes, d=row→col cell, u=col→row, containment=nesting
   function rel(r, c) {
     const R = cur.visRows[r], C = cur.visCols[c];
     if (R === C || isAnc(R, C) || isAnc(C, R)) return { R, C, rn: N[R], cn: N[C], containment: true };

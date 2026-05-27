@@ -1,8 +1,7 @@
 namespace InspectorGadget.Core;
 
-// Faithful port of Node's `path.posix` normalize/join/dirname. Analyzers key
-// everything by repo-root-relative POSIX paths and resolve with these, so the
-// resolution math is identical regardless of the host platform's separator.
+// Faithful port of Node `path.posix` normalize/join/dirname — keeps import
+// resolution identical across host OS separators.
 internal static class PosixPath
 {
     private const char Slash = '/';
