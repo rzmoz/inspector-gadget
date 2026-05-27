@@ -30,7 +30,8 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
-    <None Include="README.md" Pack="true" PackagePath="\" />
+    <!-- README is a repo-root (global) file, one level up from this project -->
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <!-- Self-contained single-file exe: pass the RID on the CLI (`dotnet publish -r

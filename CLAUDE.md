@@ -6,7 +6,9 @@ root*, with two interactive tabs over the same dependency model — a Dependency
 Structure **Matrix** and a Cytoscape dependency **Graph**. The emitted HTML has
 no runtime and no build step; it opens straight from `file://`.
 
-The tool is a single **.NET (`net10.0`) CLI** at the repo root. The two client
+The tool is a single **.NET (`net10.0`) CLI** in the `inspector-gadget/` subfolder;
+repo-level files (README, LICENSE, .gitignore, .gitattributes, this CLAUDE.md) stay
+at the repo root. The two client
 renderers + Cytoscape/fcose are embedded as resources and inlined verbatim into
 the HTML. Code splits into an **ecosystem-agnostic `Core/`** (shared model +
 viewer) and per-ecosystem analyzers in **`Analyzer/`** (`NodeAnalyzer` for
@@ -19,13 +21,14 @@ produces the shared `Core.Model`.
   whole thing is BCL-only (`System.Text.Json`, `System.Reflection.Metadata`,
   `System.Xml.Linq`). `dotnet build` is clean (0 warnings). Repo branch: `main`;
   license: MIT.
-- **Debug:** `dotnet run -- <node|dotnet> --code-root <dir> [-h|--help]`
-  (or the built exe `bin/Debug/net10.0/inspector-gadget.exe`).
-- **Release (exe):** `dotnet publish -c Release -r <rid>` (`<rid>` = win-x64/
+- **Debug:** `dotnet run --project inspector-gadget -- <node|dotnet> --code-root
+  <dir> [-h|--help]` (or the built exe
+  `inspector-gadget/bin/Debug/net10.0/inspector-gadget.exe`).
+- **Release (exe):** `dotnet publish inspector-gadget -c Release -r <rid>` (`<rid>` = win-x64/
   win-arm64/linux-x64/linux-arm64/osx-x64/osx-arm64) → single-file, self-contained,
   compressed exe. RID is supplied only at publish time; plain build/run stays
   framework-dependent and needs no RID.
-- **Release (NuGet tool):** `dotnet pack -c Release` → a **single portable,
+- **Release (NuGet tool):** `dotnet pack inspector-gadget -c Release` → a **single portable,
   OS-agnostic** .NET tool package (framework-dependent net10.0; runs anywhere the
   runtime exists), id **`lib.inspector-gadget`**, command `inspector-gadget`
   (`PackAsTool` / `ToolCommandName` in the csproj). Install via `dotnet tool
@@ -56,9 +59,11 @@ payload DTO, inlines the clients + libs into `template.html`, writes the HTML,
 and prints the directionality report. The analysis runs on a **256 MB-stack
 worker thread** so deep recursion (Tarjan + reachability DFS) can't overflow.
 
-## Files (all in the repo root)
-Root = the generic CLI shell. `Core/` = ecosystem-agnostic. `Analyzer/` =
-tech-stack-specific. `assets/` = embedded client resources.
+## Files (all under `inspector-gadget/`)
+The project lives in `inspector-gadget/`; its root = the generic CLI shell, `Core/`
+= ecosystem-agnostic, `Analyzer/` = tech-stack-specific, `assets/` = embedded client
+resources. (LICENSE, README, .gitignore, .gitattributes, CLAUDE.md sit one level up
+at the repo root.)
 
 - `Program.cs` — entry + ecosystem dispatch (validate `node|dotnet` +
   `--code-root`, `--help`); runs the analyzer + render on the large-stack worker.
