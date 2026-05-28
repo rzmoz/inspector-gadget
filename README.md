@@ -1,186 +1,140 @@
 # inspector-gadget
 
-Tooling for code inspection across tech-stacks — relevant in the AI era where
-manual coding is almost absent but understanding of code is ever as relevant.
+A Claude Code slash command for a **structural read** of any codebase. Point
+`/inspector-gadget` at a project root and you get:
 
-A config-free **codebase dependency viewer**. Point it at a project root and it
-emits a single self-contained **`codebase-dsm.html`** (no runtime; opens straight
-from `file://`) into that root, with two tabs over one shared dependency model:
+- **Interactive DSM** — a self-contained `codebase-dsm.html` (no runtime, opens
+  from `file://`) with an NDepend-style **Dependency Structure Matrix** over the
+  whole codebase: context → namespace → file, expand/collapse, triangular or
+  alphabetical order, direct or transitive reachability, third-party rows
+  toggleable.
+- **Namespace-level ASCII overview, in chat** — totals, contexts/namespaces in
+  dependency-first order, per-level cycles, cross-context asymmetries,
+  third-party concentration. No prose, no advice — just the read.
 
-- **Matrix** — an interactive NDepend-style **Dependency Structure Matrix**,
-  switchable across file / namespace / context via expand-collapse, with
-  third-party references on the row axis.
-- **Graph** — an interactive **Cytoscape** dependency graph: contexts and
-  namespaces always shown, click a namespace to reveal/hide its files, edges
-  coloured by directionality health (cycle / cross-context / forward / intra).
+Two ecosystems today, **auto-detected**:
 
-The tool is a single **.NET (`net10.0`) CLI**; the two browser renderers and
-Cytoscape + fcose are embedded into the executable and inlined into the emitted
-HTML, so there's nothing to install or serve. It analyzes two ecosystems today —
-**TypeScript/Node source** and **compiled .NET assemblies** — and is built so
-adding another is just one more analyzer producing the same model. It packages as
-the cross-platform .NET tool **`lib.inspector-gadget`** (the command stays
-`inspector-gadget`).
+- **TS/Node** — scans `.ts`/`.tsx` source, resolves imports + tsconfig `paths`.
+- **.NET** — reads built assemblies via `System.Reflection.Metadata`
+  (BCL-only): assembly → namespace → type, type→type edges from structural
+  metadata + decoded method-body IL.
 
-## Usage
+A mixed repo (TS frontend + .NET backend in one root) just works — both
+analyzers run, results merge into one model.
 
-There is **no config file** — every setting comes from CLI args and built-in
-defaults.
+## Install
+
+The repo authors the tool here; you use it by making it discoverable to Claude
+Code in any project. Pick one:
+
+**Per-repo (this repo only).** Already wired:
+```
+.claude/commands/inspector-gadget.md     ← the slash command
+tools/inspector-gadget/                  ← the node tool + dotnet helper
+```
+
+**Globally for every project.** Copy both into `~/.claude/`:
+```
+cp .claude/commands/inspector-gadget.md   ~/.claude/commands/
+cp -r tools/inspector-gadget              ~/.claude/tools/
+```
+The slash command body tries the repo-local path first, then
+`~/.claude/tools/inspector-gadget/index.mjs`, then `$USERPROFILE/.claude/tools/...`
+on Windows.
+
+**Prerequisites.**
+- **Node.js** (any LTS). Required for the orchestrator.
+- **.NET 10 SDK.** Required only when the target has `.csproj`/`.sln`
+  (the dotnet helper is invoked via `dotnet run`). First run takes a few
+  seconds to build the helper; cached after.
+- No NuGet refs, no npm dependencies, no installer.
+
+## Use
 
 ```
-inspector-gadget <node|dotnet> --code-root <dir> [-h|--help]
+/inspector-gadget [code-root]
 ```
 
-| Arg | Meaning |
+With no argument → the current working directory. With a directory path → that
+directory. The HTML viewer lands at `<code-root>/codebase-dsm.html` and the
+in-chat ASCII overview prints alongside.
+
+You can also run the tool directly without Claude Code:
+
+```
+node tools/inspector-gadget/index.mjs <code-root> [--ecosystem=ts|dotnet|auto]
+```
+
+- **stdout** = compact JSON summary (what the slash command consumes).
+- **stderr** = human-readable report (cycles, totals, output path).
+- Exit 0 on success.
+
+`--ecosystem=` forces an analyzer when auto-detection picks wrong (e.g. a
+repo with `.cs` config scripts but you only want TS, or vice versa).
+
+## How the read is shaped
+
+Everything derives from the target's layout — there is no config file.
+
+### TS/Node ecosystem
+
+| Level | What it is |
 |---|---|
-| `<node\|dotnet>` | target ecosystem (required). `node` scans a TypeScript/Node project's source; `dotnet` scans a project's **built** .NET assemblies. |
-| `--code-root <dir>` | project root to scan (**required**, no default). Also accepts `--code-root=<dir>`. |
-| `-h`, `--help` | print usage and exit. |
+| **Context** | Each immediate child directory of `--code-root` (skipping dot-dirs + `node_modules`/`dist`/`build`). Contexts with no `.ts/.tsx` are dropped. |
+| **Source root** (per context) | `src/` if present, else the context dir. Sibling `tests/` etc. are not walked. |
+| **Namespace** | First path segment under the source root; files directly in source root → `(root)`. Names are context-qualified, e.g. `Core · Model`. |
+| **Edge** | Value import. `import type` whole statements are excluded from cycles; cross-context type-only imports still surface (matrix-only, never a cycle). |
+| **Cross-context** | Each context's `tsconfig*.json` `compilerOptions.paths` (+ `baseUrl`) is auto-read (JSONC tolerated). Path aliases that resolve into a sibling context produce cross-context edges. |
+| **Third-party** | Non-relative imports that aren't a tsconfig alias (excluding `node:`). One node per package root. Sinks: never in cycles. |
 
-The output `codebase-dsm.html` is always written into the `--code-root`
-directory, and the page title is that directory's name. Open it in a browser.
+### .NET ecosystem
 
-Example:
+| Level | What it is |
+|---|---|
+| **Context** | First-party assembly. Discovered from `.csproj` layout + `bin/` output; newest write time wins. **Build the target first** (`dotnet build`). |
+| **Namespace** | C# namespace; root types → `(root)`. Context-qualified. |
+| **Leaf** | Type. |
+| **Edge** | Type→type. Sources: base, interfaces, fields, properties, method signatures, attributes, generic constraints, **plus** decoded method-body IL (every token-bearing opcode). |
+| **Third-party** | Every referenced external assembly — `System.*`, `Microsoft.*`, NuGet, … Sinks. |
+
+The cross-context / type-only edge distinctions are TS-specific.
+
+## Output
+
+Both runs (slash command and direct CLI) write the same artifact:
+`<code-root>/codebase-dsm.html` — a self-contained HTML file with the
+interactive DSM. The slash command additionally prints a namespace-level ASCII
+overview in chat.
+
+### Determinism
+
+Sorted node/edge/context lists, deterministic palette assignment by sorted
+name, stable Tarjan SCC. The HTML, the JSON summary, and the report all diff
+cleanly across runs on the same input.
+
+## Why no `dotnet tool` anymore
+
+The previous incarnation packaged as the NuGet tool `lib.inspector-gadget`.
+This one doesn't, by preference. The .NET helper that survives —
+`tools/inspector-gadget/analyze-dotnet/` — is a plain BCL-only console project
+invoked via `dotnet run`; it has no `PackAsTool`, no `ToolCommandName`, no
+`Version`. It exists only because `System.Reflection.Metadata` is the only
+clean way to read PE/IL. Everything else lives in node.
+
+## Layout (top of repo)
 
 ```
-inspector-gadget node --code-root C:\Projects\battlebuddy
+.claude/commands/inspector-gadget.md   the slash command body
+tools/inspector-gadget/
+  index.mjs            orchestrator + auto-detect + dispatch + merge
+  analyze-ts.mjs       TS/Node analyzer (in-process)
+  analyze-dotnet/      .NET analyzer (BCL-only C# helper, dotnet run)
+  model.mjs            Tarjan SCC, palette, clusters → finalized Model
+  render.mjs           matrix payload + template fill + summary
+  posix-path.mjs       Node `path.posix` port
+  assets/              template.html, template.css, dsm.client.js (inlined)
+CLAUDE.md  GLOSSARY.md  README.md  LICENSE  .gitignore  .gitattributes
 ```
-
-### Install
-
-Packaged as a cross-platform **.NET tool** — NuGet package id
-**`lib.inspector-gadget`**, invoked with the command `inspector-gadget`:
-
-```
-dotnet tool install --global lib.inspector-gadget
-inspector-gadget node --code-root <dir>
-```
-
-(`dotnet tool update --global lib.inspector-gadget` to upgrade.) Building from
-source is below.
-
-### Build & run
-
-Requires the **.NET 10 SDK**; the project lives in the `lib.inspector-gadget/` subfolder
-and has no NuGet dependencies (BCL-only).
-
-```
-# local debug (framework-dependent, no RID needed)
-dotnet run --project lib.inspector-gadget -- node --code-root <dir>
-
-# release: single-file, self-contained, OS-agnostic — pick a runtime identifier
-dotnet publish lib.inspector-gadget -c Release -r win-x64   # or win-arm64, linux-x64, linux-arm64, osx-x64, osx-arm64
-```
-
-A self-contained publish bundles the .NET runtime plus all assets, so the
-resulting single executable runs with no .NET install, no `node_modules`, and no
-other files alongside it.
-
-### The `node` ecosystem
-
-`node` walks `--code-root`, skipping the directory names `node_modules`, `dist`
-and `build` (and dot-dirs). All `.ts`/`.tsx` are scanned, **including `.d.ts` type
-declarations** — type contracts always participate. Imports are matched with
-lightweight regexes (`import`/`export … from`, side-effect `import '…'`, and
-dynamic `import()`/`require()`).
-
-#### Levels are derived from the layout
-
-- **Context** — each immediate child directory of `--code-root`, skipping the
-  excluded names and dot-dirs. A context with no scannable `.ts`/`.tsx` never
-  appears.
-- **Source root** (per context) — the context's `src/` subdir if it exists, else
-  the context dir itself (e.g. a `.d.ts`-only contract package). Only each
-  context's source root is walked, so sibling `tests/`, `__tests__/` and loose
-  config files stay out of the graph.
-- **Namespace** — the first path segment beneath the source root; files sitting
-  directly in the source root fall into `(root)`. Names are context-qualified for
-  uniqueness, e.g. `A · core`, `A · (root)`.
-
-#### Cross-context resolution (tsconfig `paths`)
-
-Non-relative imports are matched against the importing context's tsconfig
-`paths` — each context's own `tsconfig*.json` `compilerOptions.paths` (+
-`baseUrl`) is read automatically (JSONC: comments + trailing commas tolerated). A
-path-alias that targets another context (e.g. `@peek-view` →
-`../TOW.BattleBuddy/src/peek-view`) resolves to that context's files, producing a
-**cross-context first-party edge**. Type-only cross-context imports (e.g. a
-`@tow/abstractions` contract) don't enter the file graph / cycle analysis, but
-are surfaced to the **Graph** tab so contract contexts still show as
-depended-upon.
-
-#### Third-party references
-
-Non-relative imports that resolve to neither a relative file nor a tsconfig
-path-alias are collected as **third-party reference nodes** — one per package
-root (`react`, `@scope/name`, …). In the DSM they form a purple `(third-party)`
-context pinned to the bottom, toggled with the **3rd-party / hide** control.
-`node:` builtins are ignored; `import type … from 'pkg'` counts. They are pure
-sinks, so they never enter cycle analysis and appear only on the matrix row axis
-— the Graph tab is first-party (incl. cross-context) only.
-
-### The `dotnet` ecosystem
-
-`dotnet` reads the target's **built** assemblies (build the project first, e.g.
-`dotnet build`). It analyzes them NDepend-style with `System.Reflection.Metadata`
-(BCL-only): **context = assembly**, **namespace = C# namespace**, **leaf = type**.
-First-party assemblies are discovered from the `.csproj` layout + `bin` output;
-type→type edges come from both structural metadata (base/interfaces/fields/
-properties/signatures/attributes/generic constraints) and decoded method-body IL.
-Every referenced external assembly — including `System.*`/`Microsoft.*` — is a
-third-party reference. (The cross-context / type-only edge distinctions above are
-node-specific.)
-
-## Shared model & determinism
-
-Both ecosystems produce one ecosystem-agnostic model — files/types, dependency
-edges, and Tarjan **strongly-connected components** at the file, namespace, and
-context levels — which the same viewer renders into both tabs. Context and
-namespace **colours** are assigned automatically from fixed pastel palettes (by
-sorted name), and all node/edge/context lists are sorted, so the emitted HTML and
-console report are **deterministic** across runs.
-
-## Layout
-
-All under the `lib.inspector-gadget/` subfolder (repo-level files — LICENSE, README,
-.gitignore, .gitattributes, CLAUDE.md — stay at the repo root). The code is split so it's obvious which parts are
-generic and which are tech-stack-specific: **`Core/`** is ecosystem-agnostic,
-**`Analyzer/`** holds the per-ecosystem analyzers, and the root is the generic CLI
-shell. Adding another ecosystem means adding one analyzer to `Analyzer/` that
-produces the same `Core.Model`.
-
-- `Program.cs` — CLI entry + ecosystem dispatch (analysis runs on a large-stack
-  worker thread).
-- `Cli.cs` — generic CLI argument parsing (no config file).
-
-**`Core/`** — ecosystem-agnostic:
-
-- `Config.cs` — run config + generic derivation (`Config.For`).
-- `Model.cs` — the shared dependency model (files / edges / per-level SCCs /
-  context+namespace colour maps / third-party); the one definition of "the
-  codebase".
-- `ModelBuilder.cs` — `Assemble(...)`: the shared finalize step (palette colours,
-  the three Tarjan SCCs, cluster lists, namespace→files) that turns an analyzer's
-  raw output into a complete `Model`.
-- `Scc.cs` — generic Tarjan SCC + ordered-set / sequence helpers.
-- `PosixPath.cs` — `path.posix`-style normalize / join / dirname.
-- `Viewer.cs` — `Render(model, config)`: turns any `Model` into the viewer HTML;
-  computes the triangular order, inlines the matrix client, the graph client, and
-  Cytoscape + fcose, and prints the directionality report. Defines the payload DTOs.
-
-**`Analyzer/`** — the per-ecosystem analyzers (namespace `InspectorGadget.Analyzer`):
-
-- `NodeAnalyzer.cs` — `Build(config)`: scan `.ts/.tsx`, resolve imports → `Core.Model`.
-- `DotnetAnalyzer.cs` — `Build(config)`: read built assemblies via
-  `System.Reflection.Metadata` (structural + IL-body type edges) → `Core.Model`.
-
-**`assets/`** — embedded, inlined verbatim into the HTML:
-
-- `dsm.client.js` — browser renderer for the **Matrix** tab (vanilla DOM).
-- `graph.client.js` — browser renderer for the **Graph** tab (Cytoscape).
-- `{cytoscape.min.js, layout-base.js, cose-base.js, cytoscape-fcose.js}` —
-  graph libraries.
-- `{template.css, template.html}` — page CSS + HTML skeleton.
 
 ## License
 
